@@ -188,19 +188,19 @@ passes `store.extendedReasoningSupported`.
 - Modify: `HermesKit/Sources/HermesKit/Models/ModelOptions.swift`
 - Modify (or create if no model-level test file exists): `HermesKit/Tests/HermesKitTests/ModelOptionsTests.swift`
 
-- [ ] replace `reasoningEfforts` with the eight-entry ladder (`none` first, then
+- [x] replace `reasoningEfforts` with the eight-entry ladder (`none` first, then
       `VALID_REASONING_EFFORTS` verbatim); rewrite the doc comment: cite upstream #62650
       (2026-07-12), state that transports clamp per provider on the wire and that the
       server deliberately does not publish per-model `supported_efforts`, so the client
       never filters by model
-- [ ] add `extendedReasoningEfforts: Set<String> = ["max", "ultra"]` with a comment that
+- [x] add `extendedReasoningEfforts: Set<String> = ["max", "ultra"]` with a comment that
       these are the levels a pre-#62650 gateway rejects with 4002
-- [ ] add pure `offeredEfforts(extendedSupported: Bool) -> [String]` (full ladder, or the
+- [x] add pure `offeredEfforts(extendedSupported: Bool) -> [String]` (full ladder, or the
       ladder minus the extended set, order preserved)
-- [ ] write tests: full ladder when supported (exact array, `none` first, `ultra` last);
+- [x] write tests: full ladder when supported (exact array, `none` first, `ultra` last);
       latched list excludes exactly `max`/`ultra` and keeps order; `extendedReasoningEfforts`
       is a subset of `reasoningEfforts`
-- [ ] run `swift test --package-path HermesKit` — must pass before task 2
+- [x] run `swift test --package-path HermesKit` — must pass before task 2
 
 ### Task 2: Add `GatewayError.isUnknownReasoningValue`
 

@@ -56,4 +56,29 @@ struct ModelOptionsTests {
     #expect(options.supportsReasoning("mystery") == true)
     #expect(options.supportsReasoning(nil) == true)
   }
+
+  @Test func reasoningLadderIsTheFullUpstreamScale() {
+    #expect(ModelOptions.reasoningEfforts == [
+      "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+    ])
+    #expect(ModelOptions.reasoningEfforts.first == "none")
+    #expect(ModelOptions.reasoningEfforts.last == "ultra")
+  }
+
+  @Test func offeredEffortsReturnsFullLadderWhenExtendedSupported() {
+    #expect(ModelOptions.offeredEfforts(extendedSupported: true) == ModelOptions.reasoningEfforts)
+  }
+
+  @Test func offeredEffortsDropsExactlyMaxAndUltraWhenLatched() {
+    let offered = ModelOptions.offeredEfforts(extendedSupported: false)
+    #expect(offered == ["none", "minimal", "low", "medium", "high", "xhigh"])
+    // Only the extended levels are removed; the rest keeps ladder order.
+    #expect(Set(ModelOptions.reasoningEfforts).subtracting(offered) == ModelOptions.extendedReasoningEfforts)
+    #expect(offered == ModelOptions.reasoningEfforts.filter { offered.contains($0) })
+  }
+
+  @Test func extendedEffortsAreASubsetOfTheLadder() {
+    #expect(ModelOptions.extendedReasoningEfforts.isSubset(of: Set(ModelOptions.reasoningEfforts)))
+    #expect(ModelOptions.extendedReasoningEfforts == ["max", "ultra"])
+  }
 }
