@@ -277,6 +277,49 @@ struct ChatInteractionTests {
     #expect(sent.value?["value"]?.stringValue == "high")
   }
 
+  /// The full-ladder acceptance path (#81): `max` goes out on the wire, the chip takes it
+  /// optimistically, and the authoritative `session.info` the server emits after a successful
+  /// `config.set` echoes it — so the selection survives the hydrate rather than snapping back.
+  @Test func selectingMaxSendsItAndSurvivesTheEchoingSessionInfo() async {
+    let sent = LockIsolated<JSONValue?>(nil)
+    var initial = readyState()
+    initial.reasoningEffort = "medium"
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.chatSnapshot = .inMemory()
+      $0.hermesGateway.send = { @Sendable _, params in
+        sent.setValue(params)
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max" // optimistic
+    }
+    await store.finish() // no `.configSetFailed`: nothing to roll back
+
+    #expect(sent.value?["key"]?.stringValue == "reasoning")
+    #expect(sent.value?["value"]?.stringValue == "max")
+    #expect(ModelOptions.offeredEfforts(extendedSupported: store.state.extendedReasoningSupported)
+      .contains("max"))
+
+    // Server-authoritative echo — the chip stays on `max`.
+    store.exhaustivity = .off(showSkippedAssertions: false) // the snapshot-persist debounce
+    await store.send(.gatewayEvent(.sessionInfo(SessionInfo(reasoningEffort: "max"))))
+    await store.finish()
+    #expect(store.state.reasoningEffort == "max")
+  }
+
+  /// The latch is per chat slot and unpersisted, so a fresh chat re-offers `max`/`ultra` —
+  /// that is the whole recovery story for an agent upgrade (no probe, no reset action).
+  @Test func freshSlotReOffersTheExtendedLevels() {
+    let fresh = ChatFeature.State(connection: conn)
+    #expect(fresh.extendedReasoningSupported)
+    #expect(ModelOptions.offeredEfforts(extendedSupported: fresh.extendedReasoningSupported)
+      == ModelOptions.reasoningEfforts)
+  }
+
   @Test func selectionIsBlockedWhileSending() async {
     var initial = readyState()
     initial.isSending = true

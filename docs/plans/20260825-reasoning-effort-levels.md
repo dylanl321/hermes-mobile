@@ -286,14 +286,35 @@ passes `store.extendedReasoningSupported`.
       baseline-drift failures elsewhere (documented runtime drift, untouched by this task)
 
 ### Task 5: Verify acceptance criteria
-- [ ] the sheet offers `none … xhigh, max, ultra` on a current agent; selecting `max`
-      updates the chip and survives a hydrate (server `session.info` echoes it)
-- [ ] on a pre-#62650 agent (or a stub answering the 4002 text): first `max` pick rolls
+- [x] the sheet offers `none … xhigh, max, ultra` on a current agent; selecting `max`
+      updates the chip and survives a hydrate (server `session.info` echoes it) — verified by
+      `ModelOptionsTests.reasoningLadderIsTheFullUpstreamScale` /
+      `offeredEffortsReturnsFullLadderWhenExtendedSupported`, the re-recorded
+      `ComposerSnapshotTests.testModelPickerSheet` baseline (eight rows), and the new
+      `ChatInteractionTests.selectingMaxSendsItAndSurvivesTheEchoingSessionInfo`
+- [x] on a pre-#62650 agent (or a stub answering the 4002 text): first `max` pick rolls
       back, banner shows, `max`/`ultra` disappear from the sheet; a fresh chat re-offers them
-- [ ] a rejected model switch rolls back the chip and banners
-- [ ] `/reasoning` typed in the composer still falls through to `prompt.submit` (no
-      catalog change — verify `mobileHiddenCommands` untouched)
-- [ ] run full suite: `make test` and `make snapshot`
+      — verified by `ChatInteractionTests.rejectedExtendedReasoningRollsBackAndLatches`,
+      `GatewayErrorTests.unknownReasoningValue*`,
+      `ModelOptionsTests.offeredEffortsDropsExactlyMaxAndUltraWhenLatched`,
+      `ComposerSnapshotTests.testModelPickerSheet_latchedHidesExtendedEfforts`, and the new
+      `ChatInteractionTests.freshSlotReOffersTheExtendedLevels`; a real old agent is not
+      automatable — covered by Post-Completion manual verification
+- [x] a rejected model switch rolls back the chip and banners — verified by
+      `ChatInteractionTests.rejectedModelSwitchRollsBackAndBanners` (plus the no-latch
+      siblings `timedOutReasoningSelectionRollsBackWithoutLatching`,
+      `otherServerErrorOnReasoningDoesNotLatch`, `nonGatewayErrorMapsToDisconnected`, and
+      `SelfHealTests.reasoningSelectionSurfacesFailureWhenReplayAlsoFails`)
+- [x] `/reasoning` typed in the composer still falls through to `prompt.submit` (no
+      catalog change — verify `mobileHiddenCommands` untouched) — `CommandCatalog` is
+      untouched on this branch (`git diff main...HEAD` lists no catalog file);
+      `CommandCatalogTests.hideListContainsOnlySlashPrefixedLowercaseNames` still asserts
+      `/reasoning` is hidden, and `/reasoning max` was added to
+      `SlashCommandChatTests.typedHiddenOrUnknownCommandFallsThroughToPlainPrompt`
+- [x] run full suite: `make test` and `make snapshot` — `swift test`: 1196 tests / 60
+      suites, all green; `make snapshot`: the three `ModelPickerSheet` tests pass, 36
+      pre-existing baseline-drift failures in untouched suites (same 36 as Task 4;
+      documented runtime drift, not re-recorded)
 
 ### Task 6: [Final] Update documentation
 - [ ] create `docs/features/model-picker.md`: picker path + RPCs; full-scale-always with
