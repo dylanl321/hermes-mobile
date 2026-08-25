@@ -68,10 +68,16 @@ lying chip. A failure that survives the heal's single replay now becomes
 `reasoning` (a non-`GatewayError` maps to `.disconnected`, the same fallback the `model.options`
 fetch uses). The reduction is:
 
-- **Rollback, unconditionally, by key** — `state.model` / `state.reasoningEffort` back to the
-  captured previous value (the next authoritative `session.info` wins again anyway). Only the
-  newest pick per key can do so: `configSet` is `.cancellable(id: CancelID.configSet(key),
-  cancelInFlight: true)`, so a superseded request never reaches `.configSetFailed`.
+- **Rollback, unconditionally, by key** — `state.model` / `state.reasoningEffort` back to the last
+  SERVER-confirmed value, never to a still-unconfirmed pick: `State.pendingConfigRollback` holds it
+  per key, written on the first pick of a run and dropped again by the rollback or by the next
+  `session.info` / hydrate carrying that key (the next authoritative `session.info` wins again
+  anyway). Only the newest pick per key can roll back: `configSet` is
+  `.cancellable(id: CancelID.configSet(key), cancelInFlight: true)`, so a superseded request never
+  reaches `.configSetFailed`. Cancelling the effect does not recall an already-transmitted frame —
+  accepted, because the gateway's WS reader awaits each `dispatch` before reading the next frame and
+  `config.set` is not in its `_LONG_HANDLERS` pool set, so same-socket `config.set`s apply in send
+  order and the newest pick is what the server (and its trailing `session.info`) ends up holding.
 - **Latch only on the capability verdict**: `key == "reasoning" && error.isUnknownReasoningValue`.
   Transport failures and every other server error (a mid-turn 4009 included) roll back and banner
   but **never latch** — a transport failure is not a capability verdict, the same rule that keeps a

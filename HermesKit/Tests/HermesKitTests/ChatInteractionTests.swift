@@ -250,6 +250,7 @@ struct ChatInteractionTests {
 
     await store.send(.modelSelected("claude-sonnet-4-6")) {
       $0.model = "claude-sonnet-4-6" // optimistic
+      $0.pendingConfigRollback.updateValue(nil, forKey: "model") // nothing confirmed yet
     }
     await store.finish()
 
@@ -270,6 +271,7 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("high")) {
       $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue(nil, forKey: "reasoning")
     }
     await store.finish()
 
@@ -296,6 +298,7 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("max")) {
       $0.reasoningEffort = "max" // optimistic
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
     }
     await store.finish() // no `.configSetFailed`: nothing to roll back
 
@@ -356,9 +359,11 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("max")) {
       $0.reasoningEffort = "max" // optimistic
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
     }
     await store.receive(\.configSetFailed) {
       $0.reasoningEffort = "medium" // rolled back
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
       $0.extendedReasoningSupported = false
       $0.errorBanner = "This agent doesn’t support \"max\" reasoning."
     }
@@ -374,9 +379,11 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("max")) {
       $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
     }
     await store.receive(\.configSetFailed) {
       $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
       $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.timedOut(method: "config.set").message)"
     }
     await store.finish()
@@ -391,9 +398,11 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("high")) {
       $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
     }
     await store.receive(\.configSetFailed) {
       $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
       $0.errorBanner = "Couldn’t change reasoning: some other error"
     }
     await store.finish()
@@ -408,9 +417,11 @@ struct ChatInteractionTests {
 
     await store.send(.modelSelected("gpt-5-mini")) {
       $0.model = "gpt-5-mini"
+      $0.pendingConfigRollback.updateValue("gpt-5", forKey: "model")
     }
     await store.receive(\.configSetFailed) {
       $0.model = "gpt-5"
+      $0.pendingConfigRollback.removeValue(forKey: "model")
       $0.errorBanner = "Couldn’t change model: cannot switch mid-turn"
     }
     await store.finish()
@@ -427,9 +438,11 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("high")) {
       $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
     }
     await store.receive(\.configSetFailed) {
       $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
       $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.disconnected.message)"
     }
     await store.finish()
@@ -455,7 +468,11 @@ struct ChatInteractionTests {
       }
     }
 
-    await store.send(.reasoningSelected("max")) { $0.reasoningEffort = "max" }
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    // The second pick keeps the FIRST one's rollback target: "max" was never confirmed.
     await store.send(.reasoningSelected("xhigh")) { $0.reasoningEffort = "xhigh" }
     await clock.advance(by: .seconds(1))
     await store.finish()
@@ -464,6 +481,68 @@ struct ChatInteractionTests {
     #expect(store.state.extendedReasoningSupported)
     #expect(store.state.errorBanner == nil)
     #expect(store.state.modelPicker?.applyError == nil)
+  }
+
+  /// The supersession's other half: when the SECOND pick is the one that fails, the rollback
+  /// target is the last SERVER-confirmed value ("medium") — never the first pick's optimistic
+  /// "max", which the server never accepted (its request was cancelled).
+  @Test func supersededPickIsNotTheRollbackTargetForTheNewerFailure() async {
+    let clock = TestClock()
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, params in
+        guard method == "config.set" else { return .object([:]) }
+        if params["value"]?.stringValue == "max" {
+          try await clock.sleep(for: .seconds(1)) // never answers before it's cancelled
+          return .object([:])
+        }
+        throw GatewayError.server("cannot switch mid-turn")
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.send(.reasoningSelected("xhigh")) { $0.reasoningEffort = "xhigh" }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium" // NOT "max"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: cannot switch mid-turn"
+      $0.modelPicker?.applyError = "Couldn’t change reasoning: cannot switch mid-turn"
+    }
+    await clock.advance(by: .seconds(1))
+    await store.finish()
+  }
+
+  /// An authoritative `session.info` is what CONFIRMS a key: it drops the rollback target, so the
+  /// next pick captures the server's own value instead of an older one.
+  @Test func sessionInfoConfirmationResetsTheRollbackTarget() async {
+    let failing = LockIsolated(false)
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.chatSnapshot = .inMemory()
+      $0.hermesGateway.send = { @Sendable method, _ in
+        if method == "config.set", failing.value { throw GatewayError.server("busy") }
+        return .object([:])
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false) // the snapshot-persist debounce
+
+    await store.send(.reasoningSelected("high")) // accepted; rollback target is "medium"
+    await store.finish()
+    #expect(store.state.pendingConfigRollback["reasoning"] == .some("medium"))
+
+    await store.send(.gatewayEvent(.sessionInfo(SessionInfo(reasoningEffort: "high"))))
+    #expect(store.state.pendingConfigRollback["reasoning"] == nil) // confirmed, entry dropped
+
+    failing.setValue(true)
+    await store.send(.reasoningSelected("max"))
+    await store.receive(\.configSetFailed)
+    await store.finish()
+    #expect(store.state.reasoningEffort == "high") // the confirmed value, not the pre-info one
   }
 
   /// The rejection is mirrored inline into the open sheet (`errorBanner` alone sits behind the
@@ -480,9 +559,13 @@ struct ChatInteractionTests {
       }
     }
 
-    await store.send(.reasoningSelected("high")) { $0.reasoningEffort = "high" }
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
     await store.receive(\.configSetFailed) {
       $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
       $0.errorBanner = "Couldn’t change reasoning: busy"
       $0.modelPicker?.applyError = "Couldn’t change reasoning: busy"
     }
@@ -490,6 +573,7 @@ struct ChatInteractionTests {
     failing.setValue(false)
     await store.send(.reasoningSelected("high")) {
       $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
       $0.errorBanner = nil
       $0.modelPicker?.applyError = nil
     }

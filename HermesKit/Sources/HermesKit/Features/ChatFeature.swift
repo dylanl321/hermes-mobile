@@ -98,6 +98,15 @@ public struct ChatFeature {
     /// Current model + reasoning effort (from `session.info`), shown in the composer chip.
     public var model: String?
     public var reasoningEffort: String?
+    /// Rollback target for an in-flight `config.set`, keyed by config key — the value the
+    /// SERVER last confirmed, captured before the FIRST optimistic pick of a run. A second
+    /// same-key pick must NOT capture the first pick's still-unconfirmed value: when the first
+    /// is superseded (`CancelID.configSet`) and the second is then rejected, rolling back to it
+    /// would leave the chip showing a value the server never accepted. Written on a pick, and
+    /// dropped again either by the rollback (`.configSetFailed`) or by the next authoritative
+    /// confirmation of that key (`session.info` / hydrate), after which the chip IS the server's
+    /// value and the next pick captures it fresh. Internal and unpersisted.
+    var pendingConfigRollback: [String: String?]
     /// Latest context-window usage (from `session.info` / `message.complete`), driving the
     /// composer's context pill. `nil` until the agent reports usage (old agents never do).
     public var usage: Usage?
@@ -453,6 +462,7 @@ public struct ChatFeature {
       self.presentedTool = nil
       self.model = nil
       self.reasoningEffort = nil
+      self.pendingConfigRollback = [:]
       self.usage = nil
       self.modelPicker = nil
       self.renameDraft = nil
@@ -1944,7 +1954,9 @@ public struct ChatFeature {
       case let .modelSelected(model):
         // Blocked mid-turn (server returns 4009); the picker disables selection too.
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
-        let previousModel = state.model
+        // Roll back to the last SERVER-confirmed value, not to a still-in-flight pick's.
+        let previousModel = state.pendingConfigRollback["model"] ?? state.model
+        state.pendingConfigRollback.updateValue(previousModel, forKey: "model")
         state.model = model // optimistic; reconciled by the next session.info
         clearConfigError(&state)
         return configSet(
@@ -1955,7 +1967,8 @@ public struct ChatFeature {
 
       case let .reasoningSelected(effort):
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
-        let previousEffort = state.reasoningEffort
+        let previousEffort = state.pendingConfigRollback["reasoning"] ?? state.reasoningEffort
+        state.pendingConfigRollback.updateValue(previousEffort, forKey: "reasoning")
         state.reasoningEffort = effort
         clearConfigError(&state)
         return configSet(
@@ -1972,6 +1985,7 @@ public struct ChatFeature {
         case "reasoning": state.reasoningEffort = previousValue
         default: break
         }
+        state.pendingConfigRollback.removeValue(forKey: key)
         // ONLY the 4002 verdict is a capability statement; a transport failure or any other
         // server error (e.g. a mid-turn 4009) says nothing about the agent's ladder (#62 logic).
         let message: String
@@ -2276,6 +2290,7 @@ public struct ChatFeature {
       if let model = info.model?.nonEmpty { state.model = model }
       if let effort = info.reasoningEffort?.nonEmpty { state.reasoningEffort = effort }
       if let u = info.usage { state.usage = u }
+      confirmConfigKeys(info, into: &state)
       return .none
 
     case let .reviewSummary(text):
@@ -2645,6 +2660,7 @@ public struct ChatFeature {
       state.model = target.model
       state.reasoningEffort = target.reasoningEffort
       state.usage = target.usage
+      confirmConfigKeys(info, into: &state)
     }
 
     // Working indicator from the authoritative `running` flag — except while a slash exec
@@ -3454,6 +3470,16 @@ public struct ChatFeature {
   /// Drop the previous `config.set` rejection when a new pick is made, so a successful retry
   /// isn't read under a stale failure (nothing else clears it: success has no action and
   /// `session.info` leaves the banner alone).
+  /// Drop the rollback target for every key this authoritative `SessionInfo` carries: the chip
+  /// now holds the server's own value, so the next pick captures it fresh instead of an older
+  /// one. Keys the info omits keep their entry — an absent field preserves, it doesn't confirm.
+  private func confirmConfigKeys(_ info: SessionInfo, into state: inout State) {
+    if info.model?.nonEmpty != nil { state.pendingConfigRollback.removeValue(forKey: "model") }
+    if info.reasoningEffort?.nonEmpty != nil {
+      state.pendingConfigRollback.removeValue(forKey: "reasoning")
+    }
+  }
+
   private func clearConfigError(_ state: inout State) {
     state.errorBanner = nil
     state.modelPicker?.applyError = nil

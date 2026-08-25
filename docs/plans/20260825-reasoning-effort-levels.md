@@ -148,24 +148,24 @@ public var isUnknownReasoningValue: Bool
 
 **`ChatFeature.State`**: `public var extendedReasoningSupported: Bool` — `true` in `init`.
 
-**`ChatFeature.Action`**: `case configSetFailed(key: String, previousValue: String?, error: GatewayError)`.
+**`ChatFeature.Action`**: `case configSetFailed(key: String, value: String, previousValue: String?, error: GatewayError)` — `value` is the rejected pick, for the banner.
 
 **Reducer flow**
-1. `.modelSelected(m)` / `.reasoningSelected(e)`: capture `previous = state.model` /
-   `state.reasoningEffort`, write optimistic, call
+1. `.modelSelected(m)` / `.reasoningSelected(e)`: capture `previous` = the last server-confirmed
+   value (`state.pendingConfigRollback[key] ?? state.model` / `state.reasoningEffort`, stored back
+   under `key` so a superseding pick reuses it), write optimistic, call
    `configSet(key:value:previousValue:sessionID:storedSessionID:branchSeed:profile:)`.
 2. `configSet`: `do { _ = try await withSessionHeal(...) } catch let e as GatewayError {
-   await send(.configSetFailed(key:, previousValue:, error: e)) } catch {
+   await send(.configSetFailed(key:, value:, previousValue:, error: e)) } catch {
    await send(.configSetFailed(..., error: .disconnected)) }` — same non-`GatewayError`
    fallback as the `model.options` fetch.
-3. `.configSetFailed(key, previous, error)`:
+3. `.configSetFailed(key, value, previous, error)`:
    - rollback unconditionally: `"model"` → `state.model = previous`; `"reasoning"` →
      `state.reasoningEffort = previous` (server wins again on the next `session.info`).
    - latch: `key == "reasoning" && error.isUnknownReasoningValue` →
      `state.extendedReasoningSupported = false`.
-   - banner: latch case → `This agent doesn't support "<value>" reasoning.` (the
-     rejected value is carried in the action — see Task 3 for how); otherwise →
-     `Couldn't change <key>: <error.message>`.
+   - banner: latch case → `This agent doesn't support "<value>" reasoning.` (the rejected
+     value is the action's `value`); otherwise → `Couldn't change <key>: <error.message>`.
    - no `isSending` / `activity` changes (a config change is not a turn). Guards
      `!isSending` + `liveSessionID != nil` on the selection actions are unchanged.
    - the sheet stays open (the row deselects behind the banner — desktop parity).
