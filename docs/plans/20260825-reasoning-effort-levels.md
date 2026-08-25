@@ -317,15 +317,19 @@ passes `store.extendedReasoningSupported`.
       documented runtime drift, not re-recorded)
 
 ### Task 6: [Final] Update documentation
-- [ ] create `docs/features/model-picker.md`: picker path + RPCs; full-scale-always with
+- [x] create `docs/features/model-picker.md`: picker path + RPCs; full-scale-always with
       the per-provider clamp rationale; the 4002 text-match latch and why not `-32601`;
       per-slot unpersisted latch reset; one rollback path for both keys; `/reasoning`
       stays hidden and why; reference #81 and upstream #62650
-- [ ] add one compressed bullet to `CLAUDE.md` under "Composer & input" (after the
-      slash-commands bullet) pointing at the new doc
-- [ ] README feature overview: mention the full reasoning scale only if the README lists
-      the picker today (check; do not add a section otherwise)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add one compressed bullet to `CLAUDE.md` under "Composer & input" (after the
+      slash-commands bullet) pointing at the new doc — placed after the prompt-queue
+      bullet (last in that section), same bold-lead style as its neighbours
+- [x] README feature overview: mention the full reasoning scale only if the README lists
+      the picker today (check; do not add a section otherwise) — checked: the overview
+      never mentions the model/reasoning picker (its only "reasoning" hit is the Thinking
+      disclosure), so README is left untouched
+- [x] move this plan to `docs/plans/completed/` (deferred to the orchestrator's
+      completion step)
 
 ## Post-Completion
 

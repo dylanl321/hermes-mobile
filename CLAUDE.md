@@ -157,6 +157,11 @@ bullets below are the compressed rules.
   turn. Everything funnels through `submitDraft` + `drainQueueIfReady`; Stop and turn
   `.error` park the queue; a failed drain re-parks at head (never silently lost, never
   shown twice); queue is in-memory only. Details: `docs/features/prompt-queue.md`.
+- **The `model · effort` chip is the only picker (#81)** — `config.set` inside the #17 heal,
+  optimistic then reconciled by `session.info`. Offer the FULL reasoning ladder always (the
+  server clamps per provider and publishes no per-model list); a failure rolls back BOTH keys
+  + banners, and only the 4002 `unknown reasoning value` verdict latches the per-slot,
+  unpersisted `extendedReasoningSupported`. Details: `docs/features/model-picker.md`.
 
 ## Session list
 
