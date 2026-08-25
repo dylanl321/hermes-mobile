@@ -84,18 +84,10 @@ struct ChatView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Menu {
-          // Icons on every item — a `Menu` reserves the glyph gutter as soon as one item
-          // has an image, so a bare "Rename" would sit in a blank column.
-          Button("Rename", systemImage: "pencil") { store.send(.renameButtonTapped) }
-            .disabled(!store.canRename)
-          // `sessionKey` is `storedSessionID ?? liveSessionID` — nil only before a session
-          // exists at all (a brand-new chat that hasn't been created yet).
-          Button("Copy ID", systemImage: "doc.on.doc") { store.send(.copySessionIDTapped) }
-            .disabled(store.sessionKey == nil)
-        } label: {
-          Image(systemName: "ellipsis.circle")
-        }
+        // A separate view, not an inline `Menu`: this body re-runs on every streaming
+        // event, and an inline menu was rebuilt (and its toolbar button re-animated) each
+        // time — the #82 flicker loop. `ChatMenuButton` observes only its own two fields.
+        ChatMenuButton(store: store)
       }
     }
     .alert("Rename session", isPresented: renameBinding) {
