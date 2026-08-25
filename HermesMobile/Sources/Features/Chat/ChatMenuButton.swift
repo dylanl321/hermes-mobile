@@ -15,7 +15,6 @@ import SwiftUI
 /// As a child view holding the store — a reference, which SwiftUI diffs by identity, so the
 /// parent's re-render alone does not re-run this body — Observation re-evaluates it only
 /// when `canRename` / `sessionKey` change, i.e. at session creation and never mid-turn.
-/// Pinned by `ChatMenuButtonTests` through the `bodyEvaluations` probe.
 ///
 /// Deliberately takes the STORE rather than `canRename:` / `onRename:` parameters: closure
 /// fields are not comparable, so SwiftUI would have to re-run the body on every parent
@@ -24,10 +23,7 @@ struct ChatMenuButton: View {
   let store: StoreOf<ChatFeature>
 
   var body: some View {
-    #if DEBUG
-    Self.bodyEvaluations.withValue { $0 += 1 }
-    #endif
-    return Menu {
+    Menu {
       // Icons on every item — a `Menu` reserves the glyph gutter as soon as one item has
       // an image, so a bare "Rename" would sit in a blank column.
       Button("Rename", systemImage: "pencil") { store.send(.renameButtonTapped) }
@@ -40,11 +36,4 @@ struct ChatMenuButton: View {
       Image(systemName: "ellipsis.circle")
     }
   }
-
-  #if DEBUG
-  /// Test probe (#82): counts body evaluations so a hosted test can assert that streaming
-  /// churn in the parent never reaches this view. Debug-only; the release body has no
-  /// side effects.
-  static let bodyEvaluations = LockIsolated(0)
-  #endif
 }
