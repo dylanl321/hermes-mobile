@@ -69,6 +69,38 @@ struct SelfHealTests {
     #expect(store.state.reasoningEffort == "xhigh")
   }
 
+  /// The heal gets its ONE replay and no more: when the replayed `config.set` fails too, exactly
+  /// one `.configSetFailed` surfaces (rollback + banner) and no third `config.set` goes out.
+  @Test func reasoningSelectionSurfacesFailureWhenReplayAlsoFails() async {
+    let calls = LockIsolated<[String]>([])
+    var initial = healableState()
+    initial.reasoningEffort = "medium"
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, _ in
+        calls.withValue { $0.append(method) }
+        switch method {
+        case "config.set": throw GatewayError.server("session not found")
+        case "session.resume": return self.resumePayload(liveID: "fresh-live")
+        default: return .object([:])
+        }
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.reasoningSelected("xhigh")) {
+      $0.reasoningEffort = "xhigh"
+    }
+    await store.receive(\.liveSessionIDRefreshed)
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.errorBanner = "Couldn’t change reasoning: session not found"
+    }
+    await store.finish()
+
+    #expect(calls.value == ["config.set", "session.resume", "config.set"])
+    #expect(store.state.extendedReasoningSupported) // a heal failure is no capability verdict
+  }
+
   // MARK: prompt.submit self-heal
 
   @Test func promptSubmitSelfHealsOnSessionNotFoundThenSucceeds() async {

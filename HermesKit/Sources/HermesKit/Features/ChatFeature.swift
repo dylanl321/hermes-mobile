@@ -139,6 +139,14 @@ public struct ChatFeature {
     /// slash commands. Suppresses future catalog fetches; typed `/text` then goes out as a
     /// plain prompt, byte-identical to the pre-feature behavior (backward-compat guard).
     public var commandsUnsupported: Bool
+    /// Whether the agent accepts the extended reasoning levels `max`/`ultra` (upstream #62650,
+    /// 2026-07-12). Optimistically `true`: unlike the attach/commands gates there is no probe —
+    /// an older gateway answers a `config.set {key:"reasoning"}` with server error 4002
+    /// `unknown reasoning value: <v>`, so this flips only on that verdict
+    /// (`GatewayError.isUnknownReasoningValue`), never on a transport failure or any other
+    /// server error. Per chat slot and unpersisted (same lifetime as `commandsUnsupported`): a
+    /// fresh slot re-offers the levels, so an agent upgrade is picked up on the next chat (#81).
+    public var extendedReasoningSupported: Bool
     /// True while a `slash.exec`/`command.dispatch` round-trip is outstanding (#36).
     ///
     /// A slash exec locks the composer (`isSending`) but is explicitly **NOT a turn**: no
@@ -449,6 +457,7 @@ public struct ChatFeature {
       self.attachmentsUnsupported = false
       self.commandCatalog = nil
       self.commandsUnsupported = false
+      self.extendedReasoningSupported = true
       self.slashExecInFlight = false
       self.isBranching = false
       self.pendingPasteCount = 0
@@ -708,6 +717,10 @@ public struct ChatFeature {
     case modelOptionsResponse(Result<ModelOptions, GatewayError>)
     case modelSelected(String)
     case reasoningSelected(String)
+    /// A `config.set` that failed for good (the #17 heal has already had its single replay).
+    /// Carries the rejected `value` so the latch banner can name it and `previousValue` so the
+    /// optimistic picker write can roll back. One path serves both keys (#81).
+    case configSetFailed(key: String, value: String, previousValue: String?, error: GatewayError)
     case modelPickerDismissed
     case renameButtonTapped
     case confirmRename
@@ -1918,21 +1931,43 @@ public struct ChatFeature {
       case let .modelSelected(model):
         // Blocked mid-turn (server returns 4009); the picker disables selection too.
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
+        let previousModel = state.model
         state.model = model // optimistic; reconciled by the next session.info
         return configSet(
-          key: "model", value: model, sessionID: sessionID,
+          key: "model", value: model, previousValue: previousModel, sessionID: sessionID,
           storedSessionID: state.storedSessionID, branchSeed: state.branchSeed,
           profile: state.scopedProfile
         )
 
       case let .reasoningSelected(effort):
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
+        let previousEffort = state.reasoningEffort
         state.reasoningEffort = effort
         return configSet(
-          key: "reasoning", value: effort, sessionID: sessionID,
+          key: "reasoning", value: effort, previousValue: previousEffort, sessionID: sessionID,
           storedSessionID: state.storedSessionID, branchSeed: state.branchSeed,
           profile: state.scopedProfile
         )
+
+      case let .configSetFailed(key, value, previousValue, error):
+        // Roll the optimistic picker write back so the chip stops lying (the next authoritative
+        // `session.info` wins again anyway), then surface the failure — never swallowed.
+        switch key {
+        case "model": state.model = previousValue
+        case "reasoning": state.reasoningEffort = previousValue
+        default: break
+        }
+        // ONLY the 4002 verdict is a capability statement; a transport failure or any other
+        // server error (e.g. a mid-turn 4009) says nothing about the agent's ladder (#62 logic).
+        if key == "reasoning", error.isUnknownReasoningValue {
+          state.extendedReasoningSupported = false
+          state.errorBanner = "This agent doesn’t support \"\(value)\" reasoning."
+        } else {
+          state.errorBanner = "Couldn’t change \(key): \(error.message)"
+        }
+        // Deliberately no `isSending`/`activity` change: a config change is not a turn. The
+        // sheet stays open, the row deselects behind the banner (desktop parity).
+        return .none
 
       case .modelPickerDismissed:
         state.modelPicker = nil
@@ -3398,9 +3433,11 @@ public struct ChatFeature {
 
   /// Change a session setting (model / reasoning) over the gateway. If iOS resumed with a
   /// reaped live id, refresh it and replay once rather than letting the optimistic picker value
-  /// snap back when the next authoritative `session.info` arrives.
+  /// snap back when the next authoritative `session.info` arrives. A failure that survives that
+  /// single replay is surfaced as `.configSetFailed` (rollback + banner, and the 4002 latch for
+  /// `reasoning`) — never swallowed.
   private func configSet(
-    key: String, value: String, sessionID: String,
+    key: String, value: String, previousValue: String?, sessionID: String,
     storedSessionID: String?, branchSeed: State.BranchSeed?, profile: String?
   ) -> Effect<Action> {
     .run { [gateway] send in
@@ -3411,10 +3448,18 @@ public struct ChatFeature {
           "value": .string(value),
         ]))
       }
-      _ = try? await withSessionHeal(
-        setConfig, sessionID: sessionID, storedSessionID: storedSessionID,
-        branchSeed: branchSeed, profile: profile, gateway: gateway, send: send
-      )
+      do {
+        _ = try await withSessionHeal(
+          setConfig, sessionID: sessionID, storedSessionID: storedSessionID,
+          branchSeed: branchSeed, profile: profile, gateway: gateway, send: send
+        )
+      } catch let error as GatewayError {
+        await send(.configSetFailed(key: key, value: value, previousValue: previousValue, error: error))
+      } catch {
+        await send(.configSetFailed(
+          key: key, value: value, previousValue: previousValue, error: .disconnected
+        ))
+      }
     }
   }
 

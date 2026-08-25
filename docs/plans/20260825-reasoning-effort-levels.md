@@ -225,21 +225,22 @@ passes `store.extendedReasoningSupported`.
 - Modify: `HermesKit/Tests/HermesKitTests/ChatInteractionTests.swift`
 - Modify: `HermesKit/Tests/HermesKitTests/SelfHealTests.swift` (verify only)
 
-- [ ] add `public var extendedReasoningSupported: Bool` to `State`, initialised `true`
+- [x] add `public var extendedReasoningSupported: Bool` to `State`, initialised `true`
       beside `commandsUnsupported`; doc comment: per-slot, unpersisted, flipped only by the
       4002 verdict, reset on a fresh slot
-- [ ] add `case configSetFailed(key: String, value: String, previousValue: String?, error: GatewayError)`
+- [x] add `case configSetFailed(key: String, value: String, previousValue: String?, error: GatewayError)`
       to `Action` (carry the rejected `value` so the latch banner can name it)
-- [ ] change `configSet` to take `value` + `previousValue`, drop the `try?`, and
+- [x] change `configSet` to take `value` + `previousValue`, drop the `try?`, and
       `do/catch` around `withSessionHeal`: `GatewayError` → `.configSetFailed`, any other
       error → `.configSetFailed(…, error: .disconnected)`; keep the #17 heal untouched
-- [ ] in `.modelSelected` / `.reasoningSelected`, capture the previous value BEFORE the
+- [x] in `.modelSelected` / `.reasoningSelected`, capture the previous value BEFORE the
       optimistic write and pass it through
-- [ ] reduce `.configSetFailed`: unconditional rollback by key; latch when
+- [x] reduce `.configSetFailed`: unconditional rollback by key; latch when
       `key == "reasoning" && error.isUnknownReasoningValue`; set `errorBanner`
       (`This agent doesn't support "<value>" reasoning.` for the latch case,
       `Couldn't change <key>: <message>` otherwise); no `isSending`/`activity` changes
-- [ ] write tests (TestStore, `readyState()` with `reasoningEffort = "medium"`,
+      — banners use the codebase's typographic apostrophe (`doesn’t` / `Couldn’t`)
+- [x] write tests (TestStore, `readyState()` with `reasoningEffort = "medium"`,
       `model = "gpt-5"`):
       - `reasoningSelected("max")` with a stub throwing `.server("unknown reasoning value: max")`
         → optimistic `"max"`, then receives `.configSetFailed` → `reasoningEffort == "medium"`,
@@ -253,10 +254,10 @@ passes `store.extendedReasoningSupported`.
       - non-`GatewayError` thrown by the stub → `.configSetFailed(error: .disconnected)`
       - success path: `selectingReasoningSendsConfigSet` unchanged — no failure action
         received
-- [ ] confirm `reasoningSelectionSelfHealsOnSessionNotFoundThenSucceeds` still passes
+- [x] confirm `reasoningSelectionSelfHealsOnSessionNotFoundThenSucceeds` still passes
       (heal + replay succeed → no `.configSetFailed`); add a variant where the REPLAY also
       fails → exactly one `.configSetFailed`, no second retry
-- [ ] run `swift test --package-path HermesKit` — must pass before task 4
+- [x] run `swift test --package-path HermesKit` — must pass before task 4
 
 ### Task 4: Thread the latch into `ModelPickerSheet` and re-record its snapshot
 

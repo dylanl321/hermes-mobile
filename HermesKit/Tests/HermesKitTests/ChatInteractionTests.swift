@@ -286,6 +286,113 @@ struct ChatInteractionTests {
     await store.send(.reasoningSelected("high"))
   }
 
+  // MARK: config.set failures — rollback, latch, banner (#81)
+
+  /// A chat whose model + effort are already known, so a rollback has something to restore.
+  private func configuredState() -> ChatFeature.State {
+    var state = readyState()
+    state.model = "gpt-5"
+    state.reasoningEffort = "medium"
+    return state
+  }
+
+  /// A gateway stub whose `config.set` always throws `error` (everything else succeeds).
+  private func failingConfigSet(_ error: any Error) -> @Sendable (String, JSONValue) async throws -> JSONValue {
+    { @Sendable method, _ in
+      if method == "config.set" { throw error }
+      return .object([:])
+    }
+  }
+
+  /// The 4002 verdict is the ONE capability statement: roll back, banner naming the level, and
+  /// latch `max`/`ultra` off for the rest of the slot.
+  @Test func rejectedExtendedReasoningRollsBackAndLatches() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("unknown reasoning value: max"))
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max" // optimistic
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium" // rolled back
+      $0.extendedReasoningSupported = false
+      $0.errorBanner = "This agent doesn’t support \"max\" reasoning."
+    }
+    await store.finish()
+  }
+
+  /// A transport failure is NOT a capability verdict (#62 logic) — roll back and banner, but the
+  /// levels stay on offer.
+  @Test func timedOutReasoningSelectionRollsBackWithoutLatching() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.timedOut(method: "config.set"))
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.timedOut(method: "config.set").message)"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  /// Any other server error on the reasoning key surfaces but never latches.
+  @Test func otherServerErrorOnReasoningDoesNotLatch() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("some other error"))
+    }
+
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.errorBanner = "Couldn’t change reasoning: some other error"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  /// One failure path serves both keys: a rejected model switch rolls the chip back too.
+  @Test func rejectedModelSwitchRollsBackAndBanners() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("cannot switch mid-turn"))
+    }
+
+    await store.send(.modelSelected("gpt-5-mini")) {
+      $0.model = "gpt-5-mini"
+    }
+    await store.receive(\.configSetFailed) {
+      $0.model = "gpt-5"
+      $0.errorBanner = "Couldn’t change model: cannot switch mid-turn"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  private struct UnexpectedFailure: Error {}
+
+  /// A non-`GatewayError` throw maps to `.disconnected`, same fallback as `model.options`.
+  @Test func nonGatewayErrorMapsToDisconnected() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(UnexpectedFailure())
+    }
+
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.disconnected.message)"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
   // MARK: Rename via gateway session.title (Task 4)
 
   @Test func renameSuccessOptimisticAndSendsTitleRPC() async {
