@@ -226,6 +226,125 @@ struct SessionListFeatureTests {
     }
   }
 
+  // MARK: Duplicate ids in the server response (#78)
+
+  /// The list AND search endpoints can return the same session id more than once;
+  /// `IdentifiedArray(uniqueElements:)` trapped on that in the field. The response must
+  /// dedupe by id, keeping the FIRST occurrence (server order), and seed `seenCounts`
+  /// from that first occurrence only.
+  @Test func sessionsResponseWithDuplicateIDsDedupesKeepingFirst() async {
+    let store = TestStore(initialState: SessionListFeature.State(connection: connection)) {
+      SessionListFeature()
+    } withDependencies: {
+      $0.preferences = .inMemory()
+    }
+
+    await store.send(.sessionsResponse(.success([
+      Session(id: "a", title: "First a", messageCount: 3),
+      Session(id: "b", title: "b", messageCount: 1),
+      Session(id: "a", title: "Second a", messageCount: 9),
+      Session(id: "b", title: "b again"),
+    ]))) {
+      $0.isLoading = false
+      $0.sessions = [
+        Session(id: "a", title: "First a", messageCount: 3),
+        Session(id: "b", title: "b", messageCount: 1),
+      ]
+      $0.seenCounts = ["a": 3, "b": 1]
+    }
+    #expect(store.state.sessions.map(\.id) == ["a", "b"])
+  }
+
+  /// A duplicate that is also filtered by the in-flight archive/delete guard stays gone —
+  /// the guard filter and the dedupe compose (neither re-admits the removed row).
+  @Test func sessionsResponseWithDuplicateIDsRespectsInFlightGuard() async {
+    var initial = SessionListFeature.State(
+      connection: connection, sessions: [Session(id: "a"), Session(id: "b")]
+    )
+    initial.deletingIDs = ["a"]
+    let store = TestStore(initialState: initial) {
+      SessionListFeature()
+    } withDependencies: {
+      $0.preferences = .inMemory()
+    }
+
+    await store.send(.sessionsResponse(.success([
+      Session(id: "a"), Session(id: "b"), Session(id: "a"), Session(id: "b"),
+    ]))) {
+      $0.isLoading = false
+      $0.sessions = [Session(id: "b")]
+      $0.seenCounts = ["b": 0]
+    }
+    #expect(store.state.seenCounts["a"] == nil)
+  }
+
+  /// End-to-end through the search path (the crash reports' primary trigger): the search
+  /// endpoint answering with a repeated id must land as a deduped list, not a trap.
+  @Test func searchResponseWithDuplicateIDsDoesNotTrap() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: SessionListFeature.State(connection: connection)) {
+      SessionListFeature()
+    } withDependencies: {
+      $0.hermesREST.search = { @Sendable _, query in
+        [
+          Session(id: "r1", title: nil, preview: query),
+          Session(id: "r2", title: nil, preview: query),
+          Session(id: "r1", title: "dup", preview: query),
+        ]
+      }
+      $0.continuousClock = clock
+      $0.preferences = .inMemory()
+    }
+
+    await store.send(\.binding.searchQuery, "foo") { $0.searchQuery = "foo" }
+    await clock.advance(by: .milliseconds(300))
+    await store.receive(\.sessionsResponse.success) {
+      $0.sessions = [
+        Session(id: "r1", title: nil, preview: "foo"),
+        Session(id: "r2", title: nil, preview: "foo"),
+      ]
+      $0.seenCounts = ["r1": 0, "r2": 0]
+    }
+  }
+
+  /// Same hardening for profiles: a duplicate `name` in `GET /api/profiles` (both the
+  /// initial probe and the post-create refresh) dedupes instead of trapping.
+  @Test func profilesResponseWithDuplicateNamesDedupesKeepingFirst() async {
+    let prefs = PreferencesClient.inMemory()
+    let store = TestStore(
+      initialState: SessionListFeature.State(connection: connection, selectedProfileName: "work")
+    ) {
+      SessionListFeature()
+    } withDependencies: {
+      $0.date = .constant(now)
+      $0.preferences = prefs
+      $0.hermesREST.cronJobs = { @Sendable _, _ in throw RESTError.notFound }
+      $0.hermesProfiles.sessions = { @Sendable _, _, _, _, _, _ in [] }
+    }
+
+    let duplicated = [
+      Profile(name: "default", isDefault: true),
+      Profile(name: "work", model: "first"),
+      Profile(name: "work", model: "second"),
+    ]
+    await store.send(.profilesResponse(.success(duplicated))) {
+      $0.profilesSupported = true
+      $0.profiles = [Profile(name: "default", isDefault: true), Profile(name: "work", model: "first")]
+      $0.now = self.now
+      $0.isLoading = true
+    }
+    await store.receive(\.sessionsResponse.success) {
+      $0.isLoading = false
+    }
+    await store.receive(\.cronJobsResponse.failure) {
+      $0.cronJobsSupported = false
+    }
+
+    await store.send(.profilesRefreshed(duplicated))
+    #expect(store.state.profiles.map(\.id) == ["default", "work"])
+    #expect(store.state.profiles[id: "work"]?.model == "first")
+  }
+
   @Test func tappingSessionEmitsOpenDelegateAndMarksSeen() async {
     let session = Session(id: "s1", title: "Hello", messageCount: 7)
     let store = TestStore(
