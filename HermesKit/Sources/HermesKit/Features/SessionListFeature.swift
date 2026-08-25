@@ -837,10 +837,14 @@ public struct SessionListFeature {
         // Belt-and-suspenders: drop any session whose archive PATCH or DELETE is still in
         // flight, so a fetch that completes during that window can't repopulate the removed row.
         let inFlight = state.archivingIDs.union(state.deletingIDs)
-        let visible = inFlight.isEmpty
+        let filtered = inFlight.isEmpty
           ? sessions
           : sessions.filter { !inFlight.contains($0.id) }
-        state.sessions = IdentifiedArray(uniqueElements: visible)
+        // The list AND search endpoints can return the same session id more than once
+        // (#78). `IdentifiedArray(uniqueElements:)` preconditions on unique ids and
+        // trapped in the field, so dedupe first — keep the FIRST occurrence (server order).
+        state.sessions = IdentifiedArray(filtered, uniquingIDsWith: { first, _ in first })
+        let visible = state.sessions
         // Seed last-seen counts for newly-discovered sessions so they don't all show as
         // unread on first sight; only later increases flag unread.
         var seeded = false
@@ -1255,7 +1259,7 @@ public struct SessionListFeature {
 
       case let .profilesResponse(.success(result)):
         state.profilesSupported = true
-        state.profiles = IdentifiedArray(uniqueElements: result)
+        state.profiles = Self.dedupedProfiles(result)
         // If the persisted selection no longer exists on the server, re-home to default.
         if state.profiles[id: state.selectedProfileName] == nil {
           state.selectedProfileName = Self.State.defaultProfileName
@@ -1271,7 +1275,7 @@ public struct SessionListFeature {
 
       case let .profilesRefreshed(result):
         state.profilesSupported = true
-        state.profiles = IdentifiedArray(uniqueElements: result)
+        state.profiles = Self.dedupedProfiles(result)
         return .none
 
       case let .selectProfile(name):
@@ -1570,6 +1574,12 @@ public struct SessionListFeature {
 
   private func persistPinnedIDs(_ ids: [String]) -> Effect<Action> {
     .run { [preferences] _ in preferences.savePinnedIDs(ids) }
+  }
+
+  /// Build the profile array tolerating a duplicate `name` in the server response (keep
+  /// the first occurrence) — `IdentifiedArray(uniqueElements:)` traps on duplicates (#78).
+  private static func dedupedProfiles(_ profiles: [Profile]) -> IdentifiedArrayOf<Profile> {
+    IdentifiedArray(profiles, uniquingIDsWith: { first, _ in first })
   }
 }
 
