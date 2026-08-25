@@ -169,6 +169,34 @@ final class ComposerSnapshotTests: SnapshotTestCase {
     assertSnapshot(of: view, as: deviceImage())
   }
 
+  /// The per-slot latch (#81): once this slot's agent has answered 4002 "unknown reasoning
+  /// value", `extendedReasoningSupported` is false and the two extended levels drop out —
+  /// the list ends at `xhigh`, with `max`/`ultra` absent. Same fixture as
+  /// `testModelPickerSheet`, so the two baselines differ by exactly those two rows.
+  func testModelPickerSheet_latchedHidesExtendedEfforts() {
+    let picker = ChatFeature.State.ModelPicker(
+      isLoading: false,
+      options: ModelOptions(
+        providers: [
+          .init(name: "OpenAI", slug: "openai", models: ["gpt-5", "gpt-5-mini"], authenticated: true,
+                capabilities: ["gpt-5": .init(reasoning: true), "gpt-5-mini": .init(reasoning: true)]),
+          .init(name: "Anthropic", slug: "anthropic", models: [], authenticated: false,
+                warning: "paste ANTHROPIC_API_KEY to activate"),
+        ],
+        currentModel: "gpt-5"
+      )
+    )
+    let view = ModelPickerSheet(
+      picker: picker,
+      currentModel: "gpt-5",
+      currentEffort: "high",
+      isBusy: false,
+      extendedReasoningSupported: false,
+      onSelectModel: { _ in }, onSelectEffort: { _ in }, onDone: {}
+    )
+    assertSnapshot(of: view, as: deviceImage())
+  }
+
   func testModelPickerSheet_nonReasoningModelHidesEffort() {
     let picker = ChatFeature.State.ModelPicker(
       isLoading: false,

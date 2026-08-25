@@ -267,21 +267,23 @@ passes `store.extendedReasoningSupported`.
 - Modify: `HermesMobileTests/ComposerSnapshotTests.swift`
 - Delete + re-record: the `testModelPickerSheet` PNG under `HermesMobileTests/__Snapshots__/ComposerSnapshotTests/`
 
-- [ ] add `var extendedReasoningSupported: Bool = true` to `ModelPickerSheet` (defaulted so
+- [x] add `var extendedReasoningSupported: Bool = true` to `ModelPickerSheet` (defaulted so
       snapshot call sites stay unchanged) and iterate
       `ModelOptions.offeredEfforts(extendedSupported: extendedReasoningSupported)` in the
       effort `ForEach`; update the type doc comment (full scale; latch hides `max`/`ultra`)
-- [ ] pass `extendedReasoningSupported: store.extendedReasoningSupported` from `ChatView`
-- [ ] check `HermesMobile/Sources/DemoMode.swift` for any effort-list assumptions
-      (it references `reasoning`) — adjust only if it enumerates the ladder
-- [ ] delete the stale `testModelPickerSheet` baseline PNG (single file — NOT
+- [x] pass `extendedReasoningSupported: store.extendedReasoningSupported` from `ChatView`
+- [x] check `HermesMobile/Sources/DemoMode.swift` for any effort-list assumptions
+      (it references `reasoning`) — adjust only if it enumerates the ladder — its only
+      `reasoning` reference is a demo reasoning *string*, no ladder; left untouched
+- [x] delete the stale `testModelPickerSheet` baseline PNG (single file — NOT
       `make snapshot-record`), run `make snapshot` twice; verify the new baseline shows
-      eight effort rows
-- [ ] add `testModelPickerSheet_latchedHidesExtendedEfforts` (same fixture as
+      eight effort rows — verified: `none … xhigh, max, ultra` all render unclipped
+- [x] add `testModelPickerSheet_latchedHidesExtendedEfforts` (same fixture as
       `testModelPickerSheet`, `extendedReasoningSupported: false`) — record via
-      `make snapshot` twice; verify `max`/`ultra` absent
-- [ ] run `make snapshot` — the picker tests assert clean (other suites' known drift is
-      pre-existing; judge by render size)
+      `make snapshot` twice; verify `max`/`ultra` absent — verified: six rows, ends at `xhigh`
+- [x] run `make snapshot` — the picker tests assert clean (other suites' known drift is
+      pre-existing; judge by render size) — all three picker tests pass; 36/198 pre-existing
+      baseline-drift failures elsewhere (documented runtime drift, untouched by this task)
 
 ### Task 5: Verify acceptance criteria
 - [ ] the sheet offers `none … xhigh, max, ultra` on a current agent; selecting `max`
