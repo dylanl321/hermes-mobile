@@ -188,8 +188,9 @@ bullets below are the compressed rules.
   search stays flat). Details: `docs/features/session-list.md`.
 - **Row affordances**: trailing swipe = destructive default FIRST (full-swipe target),
   then Rename; context menu always offers both Archive and Delete (gated); Copy ID
-  context-menu-only; 48pt row-content floor (never a cap) keeps swipe buttons
-  icon-over-label; animations respect reduce-motion. Confirmations follow the
+  context-menu-only; rows are natural-height — NO min-height floor (a floor for
+  icon-over-label swipe buttons was tried twice and reverted as too tall, #79);
+  animations respect reduce-motion. Confirmations follow the
   destructive-actions idiom below (`ConfirmationDialogState` + `.bottomActionSheet`).
 
 ## UI idioms

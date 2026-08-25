@@ -159,16 +159,14 @@ Leading swipe (Pin) unchanged. The context menu always offers BOTH Archive and D
 (Delete capability-gated) regardless of the swipe pref. In the archived sheet Delete is
 likewise listed first (full-swipe deletes, immediately).
 
-**Row min-height floor**: `SessionRowView.contentMinHeight = 44` pt on the row *content*
-(incl. its 2pt vertical padding; natural one-line content is ~24pt). The floor exists so iOS
-renders trailing swipe buttons in the full icon-over-label style instead of collapsing them
-into cramped text-only capsules on short rows — **44 clears that threshold** (verified by a
-real swipe in the iOS 26.5 simulator). The value is a deliberate compromise iterated with
-the user on #73: 48 was tried first (~70pt cells — too tall), then no floor (~44pt cells —
-compact, but capsule swipe buttons), then 44 (+20pt over natural). It is a **floor, never a
-cap** — two-line previews and large Dynamic Type grow past it freely; the fact is pinned by
-a measured `UIWindow`-hosted XCTest (`SessionRowLayoutTests`: exact floor at `.large`,
-floor-not-cap, AX3 grows).
+**Rows are natural-height — no min-height floor**: a one-line row lands around ~44pt total,
+and its trailing swipe buttons render as iOS's compact text capsules (the icon-over-label
+style needs a taller row). A content floor was tried twice for #73 — 48pt (~70pt cells) and
+then 44pt (+20pt over natural, shipped to TestFlight in `df56ca0`) — and **reverted both
+times** (#79: testers reported the list "way too high"). The compact list is worth more than
+the fuller swipe-button style; the swipe buttons are plain `Button`s, so nothing else keys off
+the row height. Don't reintroduce a floor (or a density setting — considered and declined in
+#79) for the swipe-button rendering without revisiting that trade-off.
 
 **Confirmations present via `BottomActionSheet`, not `.confirmationDialog`**: on iOS 26 no
 system presentation docks at the bottom any more — SwiftUI's `confirmationDialog` renders as a
