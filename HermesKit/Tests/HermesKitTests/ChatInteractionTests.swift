@@ -436,6 +436,66 @@ struct ChatInteractionTests {
     #expect(store.state.extendedReasoningSupported)
   }
 
+  /// Two picks in a row: the FIRST one's late rejection must not clobber the second's value.
+  /// The newer `config.set` cancels the in-flight older one, so it never reaches
+  /// `.configSetFailed` — no rollback, no banner, and (worst case, since this stub answers the
+  /// 4002 verdict) no latch either.
+  @Test func supersededConfigSetFailureCannotClobberTheNewerPick() async {
+    let clock = TestClock()
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, params in
+        guard method == "config.set" else { return .object([:]) }
+        if params["value"]?.stringValue == "max" {
+          try await clock.sleep(for: .seconds(1)) // answers only after the second pick
+          throw GatewayError.server("unknown reasoning value: max")
+        }
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) { $0.reasoningEffort = "max" }
+    await store.send(.reasoningSelected("xhigh")) { $0.reasoningEffort = "xhigh" }
+    await clock.advance(by: .seconds(1))
+    await store.finish()
+
+    #expect(store.state.reasoningEffort == "xhigh")
+    #expect(store.state.extendedReasoningSupported)
+    #expect(store.state.errorBanner == nil)
+    #expect(store.state.modelPicker?.applyError == nil)
+  }
+
+  /// The rejection is mirrored inline into the open sheet (`errorBanner` alone sits behind the
+  /// modal), and a new pick clears both — nothing else does: a successful `config.set` has no
+  /// action and `session.info` leaves the banner alone, so a retry would read under the stale one.
+  @Test func aNewSelectionClearsThePreviousConfigError() async {
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let failing = LockIsolated(true)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, _ in
+        if method == "config.set", failing.value { throw GatewayError.server("busy") }
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("high")) { $0.reasoningEffort = "high" }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.errorBanner = "Couldn’t change reasoning: busy"
+      $0.modelPicker?.applyError = "Couldn’t change reasoning: busy"
+    }
+
+    failing.setValue(false)
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.errorBanner = nil
+      $0.modelPicker?.applyError = nil
+    }
+    await store.finish()
+  }
+
   // MARK: Rename via gateway session.title (Task 4)
 
   @Test func renameSuccessOptimisticAndSendsTitleRPC() async {

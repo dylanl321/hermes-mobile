@@ -69,16 +69,21 @@ lying chip. A failure that survives the heal's single replay now becomes
 fetch uses). The reduction is:
 
 - **Rollback, unconditionally, by key** — `state.model` / `state.reasoningEffort` back to the
-  captured previous value (the next authoritative `session.info` wins again anyway).
+  captured previous value (the next authoritative `session.info` wins again anyway). Only the
+  newest pick per key can do so: `configSet` is `.cancellable(id: CancelID.configSet(key),
+  cancelInFlight: true)`, so a superseded request never reaches `.configSetFailed`.
 - **Latch only on the capability verdict**: `key == "reasoning" && error.isUnknownReasoningValue`.
   Transport failures and every other server error (a mid-turn 4009 included) roll back and banner
   but **never latch** — a transport failure is not a capability verdict, the same rule that keeps a
   launch connection failure off the credentials path (#62).
 - **Banner**: the latch case names the rejected value (`This agent doesn’t support "<value>"
-  reasoning.`); otherwise `Couldn’t change <key>: <message>`.
+  reasoning.`); otherwise `Couldn’t change <key>: <message>`. The same text is mirrored into
+  `ModelPicker.applyError` — `errorBanner` alone would sit behind the presented sheet — where it
+  renders as an inline row above a still-usable list (never the `error` ContentUnavailableView,
+  which is the `model.options` LOAD failure). The next pick clears both.
 - **No `isSending` / `activity` change** — a config change is not a turn. The sheet stays open and
-  the row deselects behind the banner (desktop parity: `model-menu-panel.tsx`'s `patchReasoning`
-  rolls back and toasts).
+  the row deselects under the inline error (desktop parity: `model-menu-panel.tsx`'s
+  `patchReasoning` rolls back and toasts).
 
 ## `/reasoning` stays off the slash catalog — on purpose
 

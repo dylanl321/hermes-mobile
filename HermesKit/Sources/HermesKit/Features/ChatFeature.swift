@@ -282,12 +282,21 @@ public struct ChatFeature {
     public struct ModelPicker: Equatable, Sendable {
       public var isLoading: Bool
       public var options: ModelOptions?
+      /// The `model.options` LOAD failure — the sheet has no list to show at all.
       public var error: String?
+      /// The last `config.set` rejection while this sheet was up. Rendered inline over a
+      /// still-usable list (the rollback happens in the rows behind it); cleared by the
+      /// next selection.
+      public var applyError: String?
 
-      public init(isLoading: Bool = true, options: ModelOptions? = nil, error: String? = nil) {
+      public init(
+        isLoading: Bool = true, options: ModelOptions? = nil, error: String? = nil,
+        applyError: String? = nil
+      ) {
         self.isLoading = isLoading
         self.options = options
         self.error = error
+        self.applyError = applyError
       }
     }
 
@@ -835,9 +844,13 @@ public struct ChatFeature {
     }
   }
 
-  private enum CancelID {
+  private enum CancelID: Hashable {
     case socket, reconnect, hydrate, copyFeedback, copyIDToast, voiceLevels, voiceTimer,
          thinkingTimer, persist
+    /// One id per `config.set` key so a newer pick for that key supersedes the in-flight
+    /// one: a cancelled effect never emits `.configSetFailed`, so a stale rejection can't
+    /// roll the newer value back. The two keys never cancel each other.
+    case configSet(String)
   }
 
   /// Debounce window for write-back so heavy streaming doesn't thrash SQLite.
@@ -1933,6 +1946,7 @@ public struct ChatFeature {
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
         let previousModel = state.model
         state.model = model // optimistic; reconciled by the next session.info
+        clearConfigError(&state)
         return configSet(
           key: "model", value: model, previousValue: previousModel, sessionID: sessionID,
           storedSessionID: state.storedSessionID, branchSeed: state.branchSeed,
@@ -1943,6 +1957,7 @@ public struct ChatFeature {
         guard !state.isSending, let sessionID = state.liveSessionID else { return .none }
         let previousEffort = state.reasoningEffort
         state.reasoningEffort = effort
+        clearConfigError(&state)
         return configSet(
           key: "reasoning", value: effort, previousValue: previousEffort, sessionID: sessionID,
           storedSessionID: state.storedSessionID, branchSeed: state.branchSeed,
@@ -1959,14 +1974,19 @@ public struct ChatFeature {
         }
         // ONLY the 4002 verdict is a capability statement; a transport failure or any other
         // server error (e.g. a mid-turn 4009) says nothing about the agent's ladder (#62 logic).
+        let message: String
         if key == "reasoning", error.isUnknownReasoningValue {
           state.extendedReasoningSupported = false
-          state.errorBanner = "This agent doesn’t support \"\(value)\" reasoning."
+          message = "This agent doesn’t support \"\(value)\" reasoning."
         } else {
-          state.errorBanner = "Couldn’t change \(key): \(error.message)"
+          message = "Couldn’t change \(key): \(error.message)"
         }
+        state.errorBanner = message
+        // The banner sits behind the still-presented sheet, so the picker carries the same
+        // text inline — otherwise the pick just silently snaps back.
+        state.modelPicker?.applyError = message
         // Deliberately no `isSending`/`activity` change: a config change is not a turn. The
-        // sheet stays open, the row deselects behind the banner (desktop parity).
+        // sheet stays open, the row deselects under the inline error (desktop parity).
         return .none
 
       case .modelPickerDismissed:
@@ -3431,6 +3451,14 @@ public struct ChatFeature {
     }
   }
 
+  /// Drop the previous `config.set` rejection when a new pick is made, so a successful retry
+  /// isn't read under a stale failure (nothing else clears it: success has no action and
+  /// `session.info` leaves the banner alone).
+  private func clearConfigError(_ state: inout State) {
+    state.errorBanner = nil
+    state.modelPicker?.applyError = nil
+  }
+
   /// Change a session setting (model / reasoning) over the gateway. If iOS resumed with a
   /// reaped live id, refresh it and replay once rather than letting the optimistic picker value
   /// snap back when the next authoritative `session.info` arrives. A failure that survives that
@@ -3461,6 +3489,7 @@ public struct ChatFeature {
         ))
       }
     }
+    .cancellable(id: CancelID.configSet(key), cancelInFlight: true)
   }
 
 }

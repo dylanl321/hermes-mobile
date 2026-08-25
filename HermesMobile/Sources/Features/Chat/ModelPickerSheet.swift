@@ -33,6 +33,13 @@ struct ModelPickerSheet: View {
                                  description: Text(error))
         } else {
           List {
+            // An apply failure keeps the list usable — the rolled-back row is right below.
+            if let applyError = picker.applyError {
+              Section {
+                Label(applyError, systemImage: "exclamationmark.triangle")
+                  .font(.footnote).foregroundStyle(.red)
+              }
+            }
             if isBusy {
               Section {
                 Label("Finish or stop the current turn to switch models.", systemImage: "hourglass")
