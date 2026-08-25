@@ -209,14 +209,14 @@ passes `store.extendedReasoningSupported`.
 - Modify: the existing `GatewayError` / gateway client test file (locate with
   `grep -rl isUnknownMethod HermesKit/Tests`)
 
-- [ ] add `isUnknownReasoningValue` next to `isUnknownMethod`: `.server(message)` whose
+- [x] add `isUnknownReasoningValue` next to `isUnknownMethod`: `.server(message)` whose
       lowercased text `hasPrefix("unknown reasoning value")`; doc comment mirrors the
       `isUnknownMethod` justification (frame drops the code) and cites
       `tui_gateway/server.py` `config.set` → `_err(rid, 4002, "unknown reasoning value: …")`
-- [ ] write tests: matches `"unknown reasoning value: max"` (and mixed case); does not
+- [x] write tests: matches `"unknown reasoning value: max"` (and mixed case); does not
       match `"unknown method: config.set"`, `"session not found"`, `.timedOut`,
       `.disconnected`
-- [ ] run `swift test --package-path HermesKit` — must pass before task 3
+- [x] run `swift test --package-path HermesKit` — must pass before task 3
 
 ### Task 3: Surface `config.set` failures — `configSetFailed`, rollback, latch, banner
 
