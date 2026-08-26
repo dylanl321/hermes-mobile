@@ -79,11 +79,16 @@ public extension PreferencesClient {
 
 // MARK: - Saved-server upsert (shared by live + in-memory)
 
-private func upsertSavedServer(for urlString: String, in servers: inout [SavedServer]) -> SavedServer {
+/// Insert or update a saved server for `urlString`. Returns the entry and the full
+/// updated list (value-typed — safe to call from `@Sendable` preference closures).
+private func upsertSavedServer(
+  for urlString: String, into servers: [SavedServer]
+) -> (SavedServer, [SavedServer]) {
+  var servers = servers
   guard let parsed = parseServerURL(urlString) else {
     let server = SavedServer(label: urlString, baseURL: urlString)
     servers.append(server)
-    return server
+    return (server, servers)
   }
   let identity = normalizedServerIdentity(parsed)
   if let index = servers.firstIndex(where: {
@@ -92,11 +97,11 @@ private func upsertSavedServer(for urlString: String, in servers: inout [SavedSe
     var existing = servers[index]
     existing.baseURL = parsed.absoluteString
     servers[index] = existing
-    return existing
+    return (existing, servers)
   }
   let server = SavedServer(label: parsed.host ?? urlString, baseURL: parsed.absoluteString)
   servers.append(server)
-  return server
+  return (server, servers)
 }
 
 public extension PreferencesClient {
@@ -130,9 +135,8 @@ public extension PreferencesClient {
       loadServerURL: { store.string(forKey: key) },
       saveServerURL: { url in
         store.set(url, forKey: key)
-        var servers = loadSavedServersList()
-        let server = upsertSavedServer(for: url, in: &servers)
-        persistSavedServersList(servers)
+        let (server, updated) = upsertSavedServer(for: url, into: loadSavedServersList())
+        persistSavedServersList(updated)
         store.set(server.id, forKey: activeServerKey)
       },
       clearServerURL: { store.removeObject(forKey: key) },
@@ -192,9 +196,8 @@ public extension PreferencesClient {
       loadServerURL: { box.value },
       saveServerURL: { url in
         box.setValue(url)
-        var servers = savedServers.value
-        let server = upsertSavedServer(for: url, in: &servers)
-        savedServers.setValue(servers)
+        let (server, updated) = upsertSavedServer(for: url, into: savedServers.value)
+        savedServers.setValue(updated)
         activeServerID.setValue(server.id)
       },
       clearServerURL: { box.setValue(nil) },
