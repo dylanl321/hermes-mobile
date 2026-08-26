@@ -196,6 +196,11 @@ public struct SessionListFeature {
     /// outcome is applied at the list instead (capability verdict / banner), exactly like
     /// an outcome landing after dismissal.
     public var archivedSheetGeneration: Int = 0
+    /// Agent workspace browser (`/api/fs/*`). Presented as its own sheet (same host pattern
+    /// as Archived) so dismissal doesn’t kill in-flight list/preview effects owned here.
+    @Presents public var workspaceBrowser: WorkspaceBrowserFeature.State?
+    /// Whether the agent exposes `/api/fs/*` (optimistic true; flipped off on 404/405).
+    public var fsSupported: Bool
     @Presents public var addProfile: AddProfileFeature.State?
     @Presents public var confirmationDialog: ConfirmationDialogState<Action.Dialog>?
 
@@ -248,7 +253,8 @@ public struct SessionListFeature {
       analyticsSupported: Bool = true,
       copiedIDToastToken: Int? = nil,
       settings: SettingsFeature.State? = nil,
-      addProfile: AddProfileFeature.State? = nil
+      addProfile: AddProfileFeature.State? = nil,
+      fsSupported: Bool = true
     ) {
       self.connection = connection
       self.sessions = sessions
@@ -285,6 +291,7 @@ public struct SessionListFeature {
       self.copiedIDToastToken = copiedIDToastToken
       self.settings = settings
       self.addProfile = addProfile
+      self.fsSupported = fsSupported
     }
 
     /// Whether the currently-selected profile is the default (no `?profile=` scoping for
@@ -538,6 +545,11 @@ public struct SessionListFeature {
     /// Open the Archived sessions sheet (from the top-trailing menu).
     case archivedButtonTapped
     case archived(PresentationAction<ArchivedSessionsFeature.Action>)
+    /// Open the Workspaces browser sheet (Organize menu / Settings → Workspaces).
+    case workspacesButtonTapped
+    /// Jump straight into a session’s `cwd` in the Workspaces browser.
+    case openWorkspace(path: String)
+    case workspaceBrowser(PresentationAction<WorkspaceBrowserFeature.Action>)
     // MARK: Profiles
     /// Switch the active profile (persist, reset list UI, refetch the scoped session list).
     case selectProfile(name: String)
@@ -1390,7 +1402,8 @@ public struct SessionListFeature {
           pushAvailable: state.pushAvailable,
           defaultSwipeAction: state.defaultSwipeAction,
           deleteSupported: state.deleteSupported,
-          profile: state.scopedProfileName
+          profile: state.scopedProfileName,
+          fsSupported: state.fsSupported
         )
         return .none
 
@@ -1406,6 +1419,58 @@ public struct SessionListFeature {
           // Seed the sheet with the list's capability verdict so an already-flipped flag
           // hides the sheet's Delete affordances from the start.
           deleteSupported: state.deleteSupported
+        )
+        return .none
+
+      case .workspacesButtonTapped:
+        guard state.fsSupported else { return .none }
+        state.settings = nil
+        state.workspaceBrowser = WorkspaceBrowserFeature.State(
+          connection: state.connection,
+          profile: state.scopedProfileName,
+          fsSupported: state.fsSupported,
+          seedSessions: Array(state.sessions)
+        )
+        return .none
+
+      case let .openWorkspace(path):
+        guard state.fsSupported else { return .none }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .none }
+        state.settings = nil
+        state.workspaceBrowser = WorkspaceBrowserFeature.State(
+          connection: state.connection,
+          profile: state.scopedProfileName,
+          fsSupported: state.fsSupported,
+          initialPath: trimmed,
+          seedSessions: Array(state.sessions)
+        )
+        return .none
+
+      case .workspaceBrowser(.presented(.delegate(.dismiss))):
+        state.workspaceBrowser = nil
+        return .none
+
+      case .workspaceBrowser(.presented(.delegate(.fsUnsupported))):
+        state.fsSupported = false
+        state.workspaceBrowser = nil
+        if var settings = state.settings {
+          settings.fsSupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .workspaceBrowser:
+        return .none
+
+      case .settings(.presented(.delegate(.openWorkspaces))):
+        guard state.fsSupported else { return .none }
+        state.settings = nil
+        state.workspaceBrowser = WorkspaceBrowserFeature.State(
+          connection: state.connection,
+          profile: state.scopedProfileName,
+          fsSupported: state.fsSupported,
+          seedSessions: Array(state.sessions)
         )
         return .none
 
@@ -1672,6 +1737,9 @@ public struct SessionListFeature {
     }
     .ifLet(\.$archived, action: \.archived) {
       ArchivedSessionsFeature()
+    }
+    .ifLet(\.$workspaceBrowser, action: \.workspaceBrowser) {
+      WorkspaceBrowserFeature()
     }
     .ifLet(\.$addProfile, action: \.addProfile) {
       AddProfileFeature()

@@ -37,7 +37,8 @@ from your desk and still keep your agent moving.
   them, pin the ones you care about, rename or archive them — or permanently delete
   the ones you're done with, from the main list or the archived view (a Settings
   option picks whether a full swipe archives or deletes) — and resume or start a
-  new one.
+  new one. Open **Workspaces** from Organize or Settings to browse project folders
+  on the agent (derived from session working directories) and preview files.
 - **Switch profiles.** Keep multiple Hermes profiles on one agent and switch between
   them from a Safari-style header pill — each profile has its own scoped session list,
   and new chats are created under the selected one. Create custom profiles (with an

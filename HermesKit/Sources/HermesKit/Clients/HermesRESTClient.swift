@@ -309,6 +309,27 @@ public struct HermesRESTClient: Sendable {
   public var usageAnalytics: @Sendable (_ connection: ServerConnection, _ days: Int) async throws -> UsageAnalytics = { _, _ in
     throw RESTError.notFound
   }
+
+  // MARK: Remote filesystem (desktop `/api/fs` rail)
+
+  /// List a directory on the agent host — `GET /api/fs/list?path=`. Soft ENOENT/EACCES
+  /// land in `FsDirectoryListing.error` with empty entries (HTTP 200). Missing route →
+  /// `RESTError.notFound` for capability gating. Pass `profile` (non-default) to scope.
+  public var fsList: @Sendable (_ connection: ServerConnection, _ path: String, _ profile: String?) async throws -> FsDirectoryListing = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Text preview — `GET /api/fs/read-text?path=` (size-capped; may set `truncated` / `binary`).
+  public var fsReadText: @Sendable (_ connection: ServerConnection, _ path: String, _ profile: String?) async throws -> FsTextPreview = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Binary/image data URL — `GET /api/fs/read-data-url?path=`.
+  public var fsReadDataURL: @Sendable (_ connection: ServerConnection, _ path: String, _ profile: String?) async throws -> FsDataURL = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Agent terminal default cwd — `GET /api/fs/default-cwd`.
+  public var fsDefaultCwd: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> FsDefaultCwd = { _, _ in
+    throw RESTError.notFound
+  }
 }
 
 /// Body for create/update cron job REST calls.
@@ -587,6 +608,29 @@ public extension HermesRESTClient {
         let url = try makeURL(conn.baseURL, "/api/analytics/usage", query: [
           .init(name: "days", value: String(days)),
         ])
+        return try await get(url, token: conn.token, session: session)
+      },
+      fsList: { conn, path, profile in
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let profile { items.append(URLQueryItem(name: "profile", value: profile)) }
+        let url = try makeURL(conn.baseURL, "/api/fs/list", query: items)
+        return try await get(url, token: conn.token, session: session)
+      },
+      fsReadText: { conn, path, profile in
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let profile { items.append(URLQueryItem(name: "profile", value: profile)) }
+        let url = try makeURL(conn.baseURL, "/api/fs/read-text", query: items)
+        return try await get(url, token: conn.token, session: session)
+      },
+      fsReadDataURL: { conn, path, profile in
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let profile { items.append(URLQueryItem(name: "profile", value: profile)) }
+        let url = try makeURL(conn.baseURL, "/api/fs/read-data-url", query: items)
+        return try await get(url, token: conn.token, session: session)
+      },
+      fsDefaultCwd: { conn, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/fs/default-cwd", query: query)
         return try await get(url, token: conn.token, session: session)
       }
     )

@@ -16,8 +16,8 @@ public struct SessionGroup: Equatable, Sendable, Identifiable {
     self.sessions = sessions
   }
 
-  static let noWorkspaceID = "__no_workspace__"
-  static let noWorkspaceLabel = "No workspace"
+  public static let noWorkspaceID = "__no_workspace__"
+  public static let noWorkspaceLabel = "No workspace"
 
   /// Group `sessions` by workspace. Input order is preserved as group order (the list is
   /// already recency-sorted, so an active project floats up); rows within each group are
@@ -46,7 +46,7 @@ public struct SessionGroup: Equatable, Sendable, Identifiable {
   }
 
   /// Folder basename of a workspace path, or the "No workspace" label for empty paths.
-  static func label(forPath path: String) -> String {
+  public static func label(forPath path: String) -> String {
     guard !path.isEmpty else { return noWorkspaceLabel }
     let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
     let base = trimmed.split(separator: "/").last.map(String.init)

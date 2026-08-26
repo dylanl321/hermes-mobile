@@ -20,6 +20,26 @@ Older agents that 404 a route hide that feature; the rest of the app keeps worki
 
 Capability: first list 404 → hide Skills entry. Profile: omit `?profile=` for default.
 
+## Workspaces (Organize / Settings → Workspaces)
+
+Read-mostly browser for project folders on the agent host, using the desktop remote
+filesystem rail (`/api/fs/*`). Roots are **client-derived** from distinct session
+`cwd` values (plus `GET /api/fs/default-cwd`); there is no server workspace catalog.
+
+| API | Behavior |
+|-----|----------|
+| `GET /api/fs/default-cwd` | Seed / capability probe |
+| `GET /api/fs/list?path=` | Directory listing (`error: ENOENT\|…` soft-fails) |
+| `GET /api/fs/read-text?path=` | Text preview (size-capped) |
+| `GET /api/fs/read-data-url?path=` | Image / binary payload |
+
+Capability: first definitive 404/405 → hide Workspaces (Organize, Settings, session
+“Open workspace”). Profile: omit `?profile=` for default. Entry points: Organize →
+**Workspaces**, Settings → **Workspaces**, session/group context **Open workspace**.
+
+Privacy: never log file bodies or data URLs; path strings only in UI state. Mutations
+(upload / mkdir / delete) and the managed `/api/files` CRUD rail are out of scope here.
+
 ## Cron CRUD (session list)
 
 Create / edit sheets and delete confirmation on top of existing list, pause, resume,
@@ -51,8 +71,8 @@ Analytics 404 → hide usage only.
 
 ## Privacy
 
-Never log passwords, env reveal values, webhook secrets, or full `/api/env` /
-config bodies.
+Never log passwords, env reveal values, webhook secrets, full `/api/env` /
+config bodies, or workspace file contents / data URLs from `/api/fs`.
 
 ## Sideload distribution
 

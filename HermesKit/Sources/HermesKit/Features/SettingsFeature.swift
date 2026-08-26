@@ -47,6 +47,8 @@ public struct SettingsFeature {
     public var profile: String?
     /// Optimistic: hide Skills after a definitive missing-endpoint verdict.
     public var skillsSupported: Bool
+    /// Optimistic: hide Workspaces after `/api/fs` 404/405.
+    public var fsSupported: Bool
     /// Pushed via `navigationDestination` from Settings — `@Presents` so the view can
     /// bind `$store.scope` (expects `PresentationAction`).
     @Presents public var skills: SkillsFeature.State?
@@ -95,6 +97,7 @@ public struct SettingsFeature {
       deleteSupported: Bool = true,
       profile: String? = nil,
       skillsSupported: Bool = true,
+      fsSupported: Bool = true,
       skills: SkillsFeature.State? = nil,
       configSupported: Bool = true,
       configDocument: JSONValue? = nil,
@@ -121,6 +124,7 @@ public struct SettingsFeature {
       self.deleteSupported = deleteSupported
       self.profile = profile
       self.skillsSupported = skillsSupported
+      self.fsSupported = fsSupported
       self.skills = skills
       self.configSupported = configSupported
       self.configDocument = configDocument
@@ -197,6 +201,7 @@ public struct SettingsFeature {
     /// User picked a different default swipe action for session rows.
     case defaultSwipeActionChanged(SessionSwipeAction)
     case openSkillsTapped
+    case openWorkspacesTapped
     case skills(PresentationAction<SkillsFeature.Action>)
     case configResponse(Result<JSONValue, RESTError>)
     case setConfigBool(ConfigQuickEditKey, Bool)
@@ -230,6 +235,9 @@ public struct SettingsFeature {
       /// The default swipe action changed — the session list mirrors it immediately so the
       /// rows are right the moment the sheet dismisses.
       case defaultSwipeActionChanged(SessionSwipeAction)
+      /// Open the agent workspace browser — parent dismisses Settings and presents the
+      /// Workspaces sheet (keeps FS effects on the list host).
+      case openWorkspaces
     }
   }
 
@@ -452,6 +460,10 @@ public struct SettingsFeature {
           skillsSupported: state.skillsSupported
         )
         return .none
+
+      case .openWorkspacesTapped:
+        guard state.fsSupported else { return .none }
+        return .send(.delegate(.openWorkspaces))
 
       case .skills(.presented(.delegate(.skillsUnsupported))):
         state.skillsSupported = false

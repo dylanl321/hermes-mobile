@@ -109,6 +109,11 @@ struct SessionListView: View {
         ArchivedSessionsView(store: archivedStore)
       }
     }
+    .sheet(item: $store.scope(state: \.workspaceBrowser, action: \.workspaceBrowser)) { browserStore in
+      NavigationStack {
+        WorkspaceBrowserView(store: browserStore)
+      }
+    }
     .sheet(item: $store.scope(state: \.addProfile, action: \.addProfile)) { addProfileStore in
       NavigationStack {
         AddProfileView(store: addProfileStore)
@@ -510,6 +515,14 @@ struct SessionListView: View {
 
       Divider()
 
+      if store.fsSupported {
+        Button {
+          store.send(.workspacesButtonTapped)
+        } label: {
+          Label("Workspaces", systemImage: "folder")
+        }
+      }
+
       Button {
         store.send(.archivedButtonTapped)
       } label: {
@@ -535,6 +548,16 @@ struct SessionListView: View {
         }
         .font(.subheadline)
         .listRowSeparator(.hidden)
+      }
+    }
+    .contextMenu {
+      if store.fsSupported,
+        group.id != SessionGroup.noWorkspaceID,
+        !group.id.isEmpty
+      {
+        Button("Open workspace", systemImage: "folder") {
+          store.send(.openWorkspace(path: group.id))
+        }
       }
     }
   }
@@ -598,6 +621,14 @@ struct SessionListView: View {
       // swipe slot next to Rename/Archive.
       Button("Copy ID", systemImage: "doc.on.doc") {
         store.send(.copyIDButtonTapped(id: session.id))
+      }
+      if store.fsSupported,
+        let cwd = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !cwd.isEmpty
+      {
+        Button("Open workspace", systemImage: "folder") {
+          store.send(.openWorkspace(path: cwd))
+        }
       }
       // The context menu always offers BOTH destructive actions regardless of the swipe
       // default; Delete only exists on agents with the DELETE endpoint.

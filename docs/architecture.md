@@ -45,13 +45,15 @@ AppFeature                 // root nav + launch auto-connect; onboarding until c
 ├─ SessionListFeature      // flat list, grouped by workspace OR chronological (persisted) /
 │  │                       //   search / create; pin (client-side) + archive/rename/delete (server) +
 │  │                       //   working-glow auto-poll; profile pill/switcher (per-call scoped) +
-│  │                       //   presents Settings + Archived + AddProfile sheets
-│  ├─ SettingsFeature      // token mgmt, manual reconnect, debug log
+│  │                       //   presents Settings + Archived + Workspaces + AddProfile sheets
+│  ├─ SettingsFeature      // token mgmt, manual reconnect, debug log; Skills + Workspaces entry
 │  ├─ ArchivedSessionsFeature // archived list (?archived=only); restore + open delegate +
 │  │                       //   immediate delete — the `deleted` delegate carries the rollback
 │  │                       //   payload and the PARENT list runs the DELETE round-trip (a
 │  │                       //   presented sheet's effects die on dismissal); `deleteUnsupported`
 │  │                       //   mirrors the capability flag
+│  ├─ WorkspaceBrowserFeature // `/api/fs/*` roots picker + directory browse + text/image preview;
+│  │                       //   roots from session cwd + default-cwd; 404/405 → fsSupported off
 │  └─ AddProfileFeature    // create-then-PUT-soul; inline name validation + server-400 banner
 ├─ ChatScreen              // navigation-path marker ONLY (session key, no behavior) — pushing/
 │                          //   popping it never creates or destroys chat state
@@ -68,8 +70,10 @@ All side effects go through `@DependencyClient` structs (each with a `liveValue`
 a `testValue`/`.inMemory()` variant):
 
 - **`HermesRESTClient`** — status, sessions, archived sessions (`?archived=only`), search,
-  archive/rename (`PATCH /api/sessions/{id}`), delete (`DELETE /api/sessions/{id}`).
-  Session-scoped reads/mutations take an optional `profile` (omitted for default).
+  archive/rename (`PATCH /api/sessions/{id}`), delete (`DELETE /api/sessions/{id}`),
+  management routes (skills/cron/config/model/analytics), and remote FS
+  (`/api/fs/list|read-text|read-data-url|default-cwd`). Session-scoped reads/mutations take
+  an optional `profile` (omitted for default).
 - **`HermesProfileClient`** — profile CRUD + SOUL.md (`PUT /api/profiles/{name}/soul`) +
   profile-scoped session lists (`GET /api/profiles/sessions?profile=`). Capability-gated: a
   404 from `GET /api/profiles` hides the selector.

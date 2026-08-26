@@ -47,6 +47,11 @@ public struct PreferencesClient: Sendable {
   public var loadPushPromptSnooze: @Sendable () -> (count: Int, until: Date)? = { nil }
   public var savePushPromptSnooze: @Sendable (_ count: Int, _ until: Date) -> Void
   public var clearPushPromptSnooze: @Sendable () -> Void
+  /// Last browsed workspace path on the agent host (device-local). Used to highlight /
+  /// reorder the workspace picker; cleared with identity-scoped prefs on logout/user-switch.
+  public var loadLastWorkspacePath: @Sendable () -> String? = { nil }
+  public var saveLastWorkspacePath: @Sendable (_ path: String) -> Void
+  public var clearLastWorkspacePath: @Sendable () -> Void
 }
 
 public extension PreferencesClient {
@@ -58,6 +63,7 @@ public extension PreferencesClient {
     savePinnedIDs([])
     saveSeenCounts([:])
     clearSelectedProfileID()
+    clearLastWorkspacePath()
   }
 
   /// Remove one saved server and clear the active id when it pointed at that entry.
@@ -118,6 +124,7 @@ public extension PreferencesClient {
     let pushTokenKey = "hermes.push-device-token"
     let pushSnoozeCountKey = "hermes.push-prompt-snooze-count"
     let pushSnoozeUntilKey = "hermes.push-prompt-snooze-until"
+    let lastWorkspaceKey = "hermes.last-workspace-path"
     // UserDefaults is documented thread-safe but not Sendable.
     nonisolated(unsafe) let store = defaults
 
@@ -176,7 +183,10 @@ public extension PreferencesClient {
       clearPushPromptSnooze: {
         store.removeObject(forKey: pushSnoozeCountKey)
         store.removeObject(forKey: pushSnoozeUntilKey)
-      }
+      },
+      loadLastWorkspacePath: { store.string(forKey: lastWorkspaceKey) },
+      saveLastWorkspacePath: { store.set($0, forKey: lastWorkspaceKey) },
+      clearLastWorkspacePath: { store.removeObject(forKey: lastWorkspaceKey) }
     )
   }
 
@@ -192,6 +202,7 @@ public extension PreferencesClient {
     let selectedProfile = LockIsolated<String?>(nil)
     let pushToken = LockIsolated<String?>(nil)
     let pushSnooze = LockIsolated<(count: Int, until: Date)?>(nil)
+    let lastWorkspace = LockIsolated<String?>(nil)
     return PreferencesClient(
       loadServerURL: { box.value },
       saveServerURL: { url in
@@ -222,7 +233,10 @@ public extension PreferencesClient {
       clearPushDeviceToken: { pushToken.setValue(nil) },
       loadPushPromptSnooze: { pushSnooze.value },
       savePushPromptSnooze: { count, until in pushSnooze.setValue((count: count, until: until)) },
-      clearPushPromptSnooze: { pushSnooze.setValue(nil) }
+      clearPushPromptSnooze: { pushSnooze.setValue(nil) },
+      loadLastWorkspacePath: { lastWorkspace.value },
+      saveLastWorkspacePath: { lastWorkspace.setValue($0) },
+      clearLastWorkspacePath: { lastWorkspace.setValue(nil) }
     )
   }
 }
