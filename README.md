@@ -167,19 +167,35 @@ For the full web-dashboard reference (hashed passwords, more auth providers), se
 
 To run on a physical device, see [`docs/development.md`](docs/development.md).
 
+### Sideload (no Apple Developer account)
+
+CI publishes an unsigned IPA for AltStore / SideStore / [Feather](https://github.com/claration/Feather).
+Paste this source URL into your sideload tool:
+
+```
+https://github.com/dylanl321/hermes-mobile/releases/download/hermes-mobile-sideload/source.json
+```
+
+Full steps: [`altstore/README.md`](altstore/README.md). Do **not** use GitHub Actions
+artifact URLs (they expire and need auth).
+
 ## Documentation
 
 - [**Architecture**](docs/architecture.md) — how the app is structured, the TCA
   feature tree, dependency clients, and the wire protocol.
 - [**Development**](docs/development.md) — building, running on device, testing,
   snapshots, and TestFlight distribution.
+- [**Management surfaces**](docs/features/management.md) — dashboard skills, cron
+  CRUD, config quick edits, multi-server, and home ops (when present).
+- [**Sideload install**](altstore/README.md) — AltStore / Feather unsigned IPA.
 
 ## Status
 
 The MVP is feature-complete and shipping to TestFlight — the full loop (connect,
 browse/search/resume/create, stream, approve/clarify) is built and covered by unit and
 SwiftUI snapshot tests. It's a personal tool first, designed to run over a private
-network.
+network. An unsigned IPA + Feather/AltStore source is also published for sideload
+installs without an Apple Developer Program account.
 
 ## License
 
