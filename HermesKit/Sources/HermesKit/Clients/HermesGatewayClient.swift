@@ -83,6 +83,20 @@ public enum GatewayError: Error, Equatable, Sendable {
     return false
   }
 
+  /// True when the server rejected a `config.set {key:"reasoning"}` because the level isn't in
+  /// its ladder. A gateway older than upstream #62650 (2026-07-12) doesn't know `max`/`ultra`:
+  /// `tui_gateway/server.py`'s `config.set` handler runs `parse_reasoning_effort(arg)`, gets
+  /// `None`, and answers `_err(rid, 4002, f"unknown reasoning value: {value}")` — a server
+  /// error, NOT `-32601`, so the usual unknown-method probe can't gate it. `InboundFrame` keeps
+  /// only the error message and not the code, so — same contract as `isUnknownMethod` — we match
+  /// the server's stable text. Used to latch the extended levels off for the chat slot (#81).
+  public var isUnknownReasoningValue: Bool {
+    if case let .server(message) = self {
+      return message.lowercased().hasPrefix("unknown reasoning value")
+    }
+    return false
+  }
+
   /// True when the socket dropped (no transport) — distinct from a server-side protocol
   /// error. A dropped socket is already surfaced by the reducer's `.reconnecting` status, so
   /// callers can avoid raising a redundant "Connection lost." banner that would linger past

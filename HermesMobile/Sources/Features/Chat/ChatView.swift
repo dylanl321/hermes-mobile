@@ -112,6 +112,7 @@ struct ChatView: View {
           currentModel: store.model,
           currentEffort: store.reasoningEffort,
           isBusy: store.isSending,
+          extendedReasoningSupported: store.extendedReasoningSupported,
           onSelectModel: { store.send(.modelSelected($0)) },
           onSelectEffort: { store.send(.reasoningSelected($0)) },
           onDone: { store.send(.modelPickerDismissed) }
