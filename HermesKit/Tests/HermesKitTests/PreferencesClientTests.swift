@@ -15,6 +15,49 @@ struct PreferencesClientTests {
     #expect(prefs.loadServerURL() == nil)
   }
 
+  @Test func inMemorySavedServersRoundTripAndUpsert() {
+    let prefs = PreferencesClient.inMemory()
+    #expect(prefs.loadSavedServers() == [])
+    #expect(prefs.loadActiveServerID() == nil)
+
+    prefs.saveServerURL("http://mac.tailnet:9119")
+    let servers = prefs.loadSavedServers()
+    #expect(servers.count == 1)
+    #expect(servers[0].baseURL == "http://mac.tailnet:9119")
+    #expect(prefs.loadActiveServerID() == servers[0].id)
+
+    // Same server under a different spelling upserts — no duplicate row.
+    prefs.saveServerURL("HTTP://Mac.tailnet:9119")
+    #expect(prefs.loadSavedServers().count == 1)
+    #expect(prefs.loadActiveServerID() == servers[0].id)
+
+    prefs.saveServerURL("http://other.tailnet:9119")
+    #expect(prefs.loadSavedServers().count == 2)
+
+    prefs.clearServerURL()
+    #expect(prefs.loadServerURL() == nil)
+    #expect(prefs.loadSavedServers().count == 2) // list survives URL clear
+
+    prefs.removeSavedServer(id: servers[0].id)
+    #expect(prefs.loadSavedServers().count == 1)
+    #expect(prefs.loadActiveServerID() == nil)
+
+    prefs.clearAllSavedServers()
+    #expect(prefs.loadSavedServers() == [])
+  }
+
+  @Test func liveSavedServersBacksOntoProvidedDefaults() throws {
+    let suite = UserDefaults(suiteName: "hermes.prefs.test.saved")!
+    suite.removePersistentDomain(forName: "hermes.prefs.test.saved")
+    let prefs = PreferencesClient.live(defaults: suite)
+
+    prefs.saveServerURL("http://example:9119")
+    #expect(suite.data(forKey: "hermes.saved-servers") != nil)
+    #expect(suite.string(forKey: "hermes.active-server-id") != nil)
+    #expect(prefs.loadSavedServers().count == 1)
+    #expect(prefs.loadSavedServers()[0].baseURL == "http://example:9119")
+  }
+
   @Test func liveBacksOntoProvidedDefaults() {
     let suite = UserDefaults(suiteName: "hermes.prefs.test")!
     suite.removePersistentDomain(forName: "hermes.prefs.test")

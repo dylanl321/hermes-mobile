@@ -67,6 +67,9 @@ public struct AppFeature {
     /// Accepted corner: the worst outcome is the same spurious-empty-chat the self-heal
     /// produces for any unknown id, and logout's unregister keeps the window narrow.
     var pendingPushTapServerURL: URL?
+    /// When the user switches servers from Settings, remember the prior server so a connect to
+    /// a *different* dashboard can wipe foreign snapshots + identity-scoped prefs.
+    var lastServerURLBeforeSwitch: URL?
 
     public init(
       onboarding: ConnectionFeature.State = .init(),
@@ -224,16 +227,14 @@ public struct AppFeature {
         // beside a still-populated slot). The other checks are cheap belt-and-braces.
         guard !state.didRunLaunchProbe, state.home == nil, state.connectionFailed == nil,
               !state.autoConnecting,
-              let session = keychain.loadSession(.shared),
-              let urlString = preferences.loadServerURL(),
-              let url = parseServerURL(urlString)
+              let credentials = launchCredentials(keychain: keychain, preferences: preferences)
         else { return tapObserver }
         // A `.token` session with an empty token is treated as "no creds" (matches the old
         // `loadToken()`-non-empty guard) so we stay on onboarding rather than probe blindly.
-        if case .token("") = session { return tapObserver }
+        if case .token("") = credentials.session { return tapObserver }
         state.didRunLaunchProbe = true
         state.autoConnecting = true
-        let connection = ServerConnection(baseURL: url, auth: session)
+        let connection = ServerConnection(baseURL: credentials.url, auth: credentials.session)
         return .merge(
           tapObserver,
           .run { [rest] send in
@@ -292,7 +293,9 @@ public struct AppFeature {
         // repair. The tap stash and the approval badge set die with the identity too.
         let connection = state.connectionFailed?.connection
         try? keychain.deleteSession()
+        clearAllSavedServerAuth(keychain: keychain, preferences: preferences)
         preferences.clearServerURL()
+        preferences.clearAllSavedServers()
         preferences.clearIdentityScopedPrefs()
         preferences.saveGroupingMode(.default)
         preferences.saveDefaultSessionSwipeAction(.default)
@@ -304,6 +307,7 @@ public struct AppFeature {
         state.pendingPushTap = nil
         state.pendingPushTapServerURL = nil
         state.pendingApprovalSessionIDs = []
+        state.lastServerURLBeforeSwitch = nil
         return .merge(setBadge(state), unregisterPushOnLogout(connection: connection))
 
       case let .scenePhaseChanged(phase):
@@ -433,6 +437,7 @@ public struct AppFeature {
         // never coexist. `AppView` would render `home` while the `ifLet` child stayed alive,
         // re-probing on every foreground for the process lifetime.
         state.connectionFailed = nil
+        applyForeignServerCleanupIfNeeded(&state, newConnection: connection)
         state.home = makeHomeState(connection: connection)
         // Auto-connect failure falls back to onboarding, so a manual login must also replay
         // a stashed cold-launch tap (#46).
@@ -591,7 +596,26 @@ public struct AppFeature {
         state.path = .init()
         state.liveChat = nil
         state.home = nil
-        state.onboarding = .init()
+        state.onboarding = ConnectionFeature.State(savedServers: preferences.loadSavedServers())
+        state.pendingPushTap = nil
+        state.pendingPushTapServerURL = nil
+        state.pendingApprovalSessionIDs = []
+        state.lastServerURLBeforeSwitch = nil
+        return .merge(setBadge(state), unregisterPushOnLogout(connection: connection))
+
+      case .home(.delegate(.switchServer)):
+        // Switch to another saved dashboard: drop the live session/UI state but keep every
+        // saved server + its per-server Keychain auth intact for the onboarding picker.
+        let connection = state.home?.connection
+        state.lastServerURLBeforeSwitch = connection?.baseURL
+        try? keychain.deleteSession()
+        preferences.clearActiveServerID()
+        preferences.clearServerURL()
+        chatSnapshot.wipeAll()
+        state.path = .init()
+        state.liveChat = nil
+        state.home = nil
+        state.onboarding = ConnectionFeature.State(savedServers: preferences.loadSavedServers())
         state.pendingPushTap = nil
         state.pendingPushTapServerURL = nil
         state.pendingApprovalSessionIDs = []
@@ -631,7 +655,9 @@ public struct AppFeature {
         // as `.disconnect`, through the other logout path); badge reset to zero.
         let connection = state.home?.connection ?? state.liveChat?.connection
         try? keychain.deleteSession()
+        clearAllSavedServerAuth(keychain: keychain, preferences: preferences)
         preferences.clearServerURL()
+        preferences.clearAllSavedServers()
         preferences.clearIdentityScopedPrefs()
         preferences.saveGroupingMode(.default)
         preferences.saveDefaultSessionSwipeAction(.default)
@@ -643,6 +669,7 @@ public struct AppFeature {
         state.pendingPushTap = nil
         state.pendingPushTapServerURL = nil
         state.pendingApprovalSessionIDs = []
+        state.lastServerURLBeforeSwitch = nil
         return .merge(setBadge(state), unregisterPushOnLogout(connection: connection))
 
       case let .liveChat(.delegate(.branchCreated(creation))):
@@ -814,7 +841,7 @@ public struct AppFeature {
     state.pendingPushTap = nil
     state.pendingPushTapServerURL = nil
     if let origin, let connected = state.home?.connection.baseURL,
-       !Self.isSameServer(origin, connected) {
+       !isSameHermesServer(origin, connected) {
       guard !state.pendingApprovalSessionIDs.isEmpty else { return .none }
       state.pendingApprovalSessionIDs.removeAll()
       return setBadge(state)
@@ -822,15 +849,51 @@ public struct AppFeature {
     return .send(.pushTapped(tap))
   }
 
-  /// Server identity for the stash guard: scheme + host (both case-insensitive per
-  /// RFC 3986, so lowercased) + literal port — path/trailing-slash/casing variations of
-  /// the same server must not drop a legitimate replay. Default-port drift
-  /// (`http://host` vs `http://host:80`) is accepted as a mismatch: both URLs come from
-  /// the same persisted-string pipeline, so they only diverge across a genuine re-login.
-  private static func isSameServer(_ a: URL, _ b: URL) -> Bool {
-    a.scheme?.lowercased() == b.scheme?.lowercased()
-      && a.host?.lowercased() == b.host?.lowercased()
-      && a.port == b.port
+  /// Resolve persisted launch credentials: active saved server (URL + per-server Keychain)
+  /// with legacy single-account fallbacks for older installs.
+  private func launchCredentials(
+    keychain: KeychainClient,
+    preferences: PreferencesClient
+  ) -> (url: URL, session: AuthSession)? {
+    var urlString: String?
+    var session: AuthSession?
+
+    if let activeID = preferences.loadActiveServerID(),
+       let saved = preferences.loadSavedServers().first(where: { $0.id == activeID }) {
+      urlString = saved.baseURL
+      session = keychain.loadSessionForServer(activeID, .shared)
+    }
+    if urlString == nil {
+      urlString = preferences.loadServerURL()
+    }
+    if session == nil {
+      session = keychain.loadSession(.shared)
+    }
+    guard let urlString, let url = parseServerURL(urlString), let session else { return nil }
+    return (url, session)
+  }
+
+  /// Full logout: delete every per-server Keychain item we know about.
+  private func clearAllSavedServerAuth(
+    keychain: KeychainClient,
+    preferences: PreferencesClient
+  ) {
+    for server in preferences.loadSavedServers() {
+      try? keychain.deleteSessionForServer(server.id)
+    }
+  }
+
+  /// After switching dashboards, wipe foreign cache + identity prefs when landing on a new server.
+  private func applyForeignServerCleanupIfNeeded(
+    _ state: inout State,
+    newConnection: ServerConnection
+  ) {
+    defer { state.lastServerURLBeforeSwitch = nil }
+    guard let previous = state.lastServerURLBeforeSwitch,
+          !isSameHermesServer(previous, newConnection.baseURL)
+    else { return }
+    chatSnapshot.wipeAll()
+    preferences.clearIdentityScopedPrefs()
   }
 
   /// Fill the live-chat slot and (re)set the navigation path to that chat's single marker.
@@ -850,7 +913,8 @@ public struct AppFeature {
   private func fallBackToOnboarding(_ state: inout State, connection: ServerConnection) {
     state.onboarding = ConnectionFeature.State(
       serverURL: connection.baseURL.absoluteString,
-      token: connection.auth.token ?? ""
+      token: connection.auth.token ?? "",
+      savedServers: preferences.loadSavedServers()
     )
   }
 

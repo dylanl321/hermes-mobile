@@ -43,6 +43,25 @@ public struct SettingsFeature {
     /// session list's capability flag). When false the swipe-action picker is hidden —
     /// Delete isn't offered anywhere, so the choice would be meaningless.
     public var deleteSupported: Bool
+    /// Non-default profile for management REST scoping (`?profile=`); `nil` omits.
+    public var profile: String?
+    /// Optimistic: hide Skills after a definitive missing-endpoint verdict.
+    public var skillsSupported: Bool
+    /// Pushed via `navigationDestination` from Settings — `@Presents` so the view can
+    /// bind `$store.scope` (expects `PresentationAction`).
+    @Presents public var skills: SkillsFeature.State?
+    /// Optimistic: hide Quick edits after config 404.
+    public var configSupported: Bool
+    public var configDocument: JSONValue?
+    public var isLoadingConfig: Bool
+    public var configError: String?
+    public var configSavingKey: String?
+    /// Optimistic: hide REST model picker after options 404.
+    public var modelRESTSupported: Bool
+    public var modelOptions: ModelOptions?
+    public var isLoadingModels: Bool
+    public var modelError: String?
+    public var isSettingModel: Bool
 
     /// The outcome of a "send test notification" attempt, surfaced in the view/snapshots.
     public enum TestPushStatus: Equatable, Sendable {
@@ -73,7 +92,20 @@ public struct SettingsFeature {
       pushPlugin: PushPluginInfo? = nil,
       pluginUpdate: PluginUpdateStatus = .idle,
       defaultSwipeAction: SessionSwipeAction = .default,
-      deleteSupported: Bool = true
+      deleteSupported: Bool = true,
+      profile: String? = nil,
+      skillsSupported: Bool = true,
+      skills: SkillsFeature.State? = nil,
+      configSupported: Bool = true,
+      configDocument: JSONValue? = nil,
+      isLoadingConfig: Bool = false,
+      configError: String? = nil,
+      configSavingKey: String? = nil,
+      modelRESTSupported: Bool = true,
+      modelOptions: ModelOptions? = nil,
+      isLoadingModels: Bool = false,
+      modelError: String? = nil,
+      isSettingModel: Bool = false
     ) {
       self.connection = connection
       self.token = connection.token ?? ""
@@ -87,6 +119,24 @@ public struct SettingsFeature {
       self.pluginUpdate = pluginUpdate
       self.defaultSwipeAction = defaultSwipeAction
       self.deleteSupported = deleteSupported
+      self.profile = profile
+      self.skillsSupported = skillsSupported
+      self.skills = skills
+      self.configSupported = configSupported
+      self.configDocument = configDocument
+      self.isLoadingConfig = isLoadingConfig
+      self.configError = configError
+      self.configSavingKey = configSavingKey
+      self.modelRESTSupported = modelRESTSupported
+      self.modelOptions = modelOptions
+      self.isLoadingModels = isLoadingModels
+      self.modelError = modelError
+      self.isSettingModel = isSettingModel
+    }
+
+    public var availableQuickEditKeys: [ConfigQuickEditKey] {
+      guard let configDocument else { return [] }
+      return AgentConfigDocument.availableQuickEditKeys(in: configDocument)
     }
 
     /// The installed plugin is behind `PushSetup.minimumPluginVersion` AND the agent can pull
@@ -122,6 +172,7 @@ public struct SettingsFeature {
     case logUpdated([GatewayLogEntry])
     case saveTokenTapped
     case clearTokenTapped
+    case switchServerTapped
     case reconnectTapped
     case doneTapped
     /// The current OS authorization status, read on appearance (drives the toggle).
@@ -145,6 +196,15 @@ public struct SettingsFeature {
     case pluginUpdateResult(PluginUpdateOutcome)
     /// User picked a different default swipe action for session rows.
     case defaultSwipeActionChanged(SessionSwipeAction)
+    case openSkillsTapped
+    case skills(PresentationAction<SkillsFeature.Action>)
+    case configResponse(Result<JSONValue, RESTError>)
+    case setConfigBool(ConfigQuickEditKey, Bool)
+    case setConfigString(ConfigQuickEditKey, String)
+    case configSaveFinished(key: String, Result<JSONValue, RESTError>)
+    case modelOptionsResponse(Result<ModelOptions, RESTError>)
+    case selectModel(model: String, provider: String?)
+    case setModelFinished(Result<Void, RESTError>)
     case delegate(Delegate)
 
     /// Result of the in-app plugin update, flattened to an `Equatable` shape (the failure
@@ -161,6 +221,7 @@ public struct SettingsFeature {
     @CasePathable
     public enum Delegate {
       case disconnect             // token cleared → back to onboarding
+      case switchServer           // pick another saved dashboard
       case reconnect              // reload the session list
       case tokenSaved(String)     // re-pasted token persisted
       /// The push guide's "Ask agent to install" — dismiss Settings and open a new chat with
@@ -205,7 +266,9 @@ public struct SettingsFeature {
           // an unreachable/old agent maps to `.unknown`, which offers nothing.
           .run { [rest, connection = state.connection] send in
             await send(.pushPluginInfoLoaded(rest.pushPluginInfo(connection)))
-          }
+          },
+          loadConfig(state),
+          loadModelOptions(state)
         )
 
       case let .pushPluginInfoLoaded(info):
@@ -337,13 +400,24 @@ public struct SettingsFeature {
         state.connection.token = token
         state.savedConfirmation = true
         try? keychain.saveToken(token)
+        if let serverID = preferences.loadActiveServerID() {
+          try? keychain.saveSessionForServer(serverID, .token(token))
+        }
         return .send(.delegate(.tokenSaved(token)))
 
       case .clearTokenTapped:
+        // Disconnect from THIS dashboard only: drop its saved entry + per-server auth,
+        // keep other saved servers intact.
+        let activeID = preferences.loadActiveServerID()
+        if let activeID {
+          try? keychain.deleteSessionForServer(activeID)
+          preferences.removeSavedServer(id: activeID)
+        }
         // Clear the full session (token + any gated cookies in the shared jar), not just the
         // token — a gated logout must leave no cookie behind.
         try? keychain.deleteSession()
         preferences.clearServerURL()
+        preferences.clearActiveServerID()
         preferences.savePinnedIDs([]) // pins are per-server; drop them on logout
         preferences.saveSeenCounts([:]) // unread state is per-server; drop it too
         preferences.saveGroupingMode(.default) // reset the list grouping pref on logout
@@ -352,6 +426,12 @@ public struct SettingsFeature {
         chatSnapshot.wipeAll() // snapshots + turn anchors are per-server — wipe on logout
         return .merge(
           .send(.delegate(.disconnect)),
+          .run { [dismiss] _ in await dismiss() }
+        )
+
+      case .switchServerTapped:
+        return .merge(
+          .send(.delegate(.switchServer)),
           .run { [dismiss] _ in await dismiss() }
         )
 
@@ -364,8 +444,165 @@ public struct SettingsFeature {
       case .doneTapped:
         return .run { [dismiss] _ in await dismiss() }
 
+      case .openSkillsTapped:
+        guard state.skillsSupported else { return .none }
+        state.skills = SkillsFeature.State(
+          connection: state.connection,
+          profile: state.profile,
+          skillsSupported: state.skillsSupported
+        )
+        return .none
+
+      case .skills(.presented(.delegate(.skillsUnsupported))):
+        state.skillsSupported = false
+        state.skills = nil
+        return .none
+
+      case .skills:
+        return .none
+
+      case let .configResponse(.success(config)):
+        state.isLoadingConfig = false
+        state.configSupported = true
+        state.configDocument = config
+        state.configError = nil
+        return .none
+
+      case let .configResponse(.failure(error)):
+        state.isLoadingConfig = false
+        if error.isMissingEndpointVerdict {
+          state.configSupported = false
+          state.configDocument = nil
+          return .none
+        }
+        state.configError = error.message
+        return .none
+
+      case let .setConfigBool(key, value):
+        state.configSavingKey = key.rawValue
+        state.configError = nil
+        return saveConfigValue(state, key: key, value: .bool(value))
+
+      case let .setConfigString(key, text):
+        state.configSavingKey = key.rawValue
+        state.configError = nil
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Prefer number when the field looks numeric (max turns / iterations).
+        if key == .agentMaxTurns || key == .agentMaxIterations,
+           let number = Double(trimmed) {
+          return saveConfigValue(state, key: key, value: .number(number))
+        }
+        return saveConfigValue(state, key: key, value: .string(trimmed))
+
+      case let .configSaveFinished(key, .success(config)):
+        state.configSavingKey = nil
+        state.configDocument = config
+        state.configError = nil
+        _ = key
+        return .none
+
+      case let .configSaveFinished(_, .failure(error)):
+        state.configSavingKey = nil
+        state.configError = error.message
+        return .none
+
+      case let .modelOptionsResponse(.success(options)):
+        state.isLoadingModels = false
+        state.modelRESTSupported = true
+        state.modelOptions = options
+        state.modelError = nil
+        return .none
+
+      case let .modelOptionsResponse(.failure(error)):
+        state.isLoadingModels = false
+        if error.isMissingEndpointVerdict {
+          state.modelRESTSupported = false
+          state.modelOptions = nil
+          return .none
+        }
+        state.modelError = error.message
+        return .none
+
+      case let .selectModel(model, provider):
+        guard !state.isSettingModel else { return .none }
+        state.isSettingModel = true
+        state.modelError = nil
+        let conn = state.connection
+        let profile = state.profile
+        return .run { [rest] send in
+          do {
+            try await rest.setModel(conn, model, provider, profile)
+            await send(.setModelFinished(.success(())))
+          } catch {
+            await send(.setModelFinished(.failure(asRESTError(error))))
+          }
+        }
+
+      case .setModelFinished(.success):
+        state.isSettingModel = false
+        return loadModelOptions(state)
+
+      case let .setModelFinished(.failure(error)):
+        state.isSettingModel = false
+        if error.isMissingEndpointVerdict {
+          state.modelRESTSupported = false
+        } else {
+          state.modelError = error.message
+        }
+        return .none
+
       case .delegate:
         return .none
+      }
+    }
+    .ifLet(\.$skills, action: \.skills) {
+      SkillsFeature()
+    }
+  }
+
+  private func loadConfig(_ state: State) -> Effect<Action> {
+    guard state.configSupported else { return .none }
+    let conn = state.connection
+    let profile = state.profile
+    return .run { [rest] send in
+      do {
+        let config = try await rest.config(conn, profile)
+        await send(.configResponse(.success(config)))
+      } catch {
+        await send(.configResponse(.failure(asRESTError(error))))
+      }
+    }
+  }
+
+  private func loadModelOptions(_ state: State) -> Effect<Action> {
+    guard state.modelRESTSupported else { return .none }
+    let conn = state.connection
+    let profile = state.profile
+    return .run { [rest] send in
+      do {
+        let options = try await rest.modelOptionsREST(conn, profile)
+        await send(.modelOptionsResponse(.success(options)))
+      } catch {
+        await send(.modelOptionsResponse(.failure(asRESTError(error))))
+      }
+    }
+  }
+
+  private func saveConfigValue(
+    _ state: State, key: ConfigQuickEditKey, value: JSONValue
+  ) -> Effect<Action> {
+    guard var document = state.configDocument else { return .none }
+    AgentConfigDocument.set(key.rawValue, value: value, on: &document)
+    let conn = state.connection
+    let profile = state.profile
+    // Caller mutates saving key via a slight dance — we return an effect that the
+    // Reduce case sets state before calling; set here by copying through action.
+    return .run { [rest, document] send in
+      do {
+        try await rest.putConfig(conn, document, profile)
+        await send(.configSaveFinished(key: key.rawValue, .success(document)))
+      } catch {
+        await send(.configSaveFinished(key: key.rawValue, .failure(asRESTError(error))))
       }
     }
   }

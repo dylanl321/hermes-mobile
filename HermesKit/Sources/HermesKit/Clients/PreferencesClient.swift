@@ -11,6 +11,12 @@ public struct PreferencesClient: Sendable {
   public var loadServerURL: @Sendable () -> String? = { nil }
   public var saveServerURL: @Sendable (_ url: String) -> Void
   public var clearServerURL: @Sendable () -> Void
+  /// Device-local saved dashboard servers (non-secret). Auth is keyed by `SavedServer.id`.
+  public var loadSavedServers: @Sendable () -> [SavedServer] = { [] }
+  public var saveSavedServers: @Sendable (_ servers: [SavedServer]) -> Void = { _ in }
+  public var loadActiveServerID: @Sendable () -> String? = { nil }
+  public var saveActiveServerID: @Sendable (_ id: String) -> Void = { _ in }
+  public var clearActiveServerID: @Sendable () -> Void = { }
   /// Last-seen message count per session id — used to flag unread activity.
   public var loadSeenCounts: @Sendable () -> [String: Int] = { [:] }
   public var saveSeenCounts: @Sendable (_ counts: [String: Int]) -> Void
@@ -53,12 +59,57 @@ public extension PreferencesClient {
     saveSeenCounts([:])
     clearSelectedProfileID()
   }
+
+  /// Remove one saved server and clear the active id when it pointed at that entry.
+  func removeSavedServer(id: String) {
+    var servers = loadSavedServers()
+    servers.removeAll { $0.id == id }
+    saveSavedServers(servers)
+    if loadActiveServerID() == id {
+      clearActiveServerID()
+    }
+  }
+
+  /// Drop every saved server and the active-server pointer (full logout).
+  func clearAllSavedServers() {
+    saveSavedServers([])
+    clearActiveServerID()
+  }
+}
+
+// MARK: - Saved-server upsert (shared by live + in-memory)
+
+/// Insert or update a saved server for `urlString`. Returns the entry and the full
+/// updated list (value-typed — safe to call from `@Sendable` preference closures).
+private func upsertSavedServer(
+  for urlString: String, into servers: [SavedServer]
+) -> (SavedServer, [SavedServer]) {
+  var servers = servers
+  guard let parsed = parseServerURL(urlString) else {
+    let server = SavedServer(label: urlString, baseURL: urlString)
+    servers.append(server)
+    return (server, servers)
+  }
+  let identity = normalizedServerIdentity(parsed)
+  if let index = servers.firstIndex(where: {
+    parseServerURL($0.baseURL).map { normalizedServerIdentity($0) == identity } ?? false
+  }) {
+    var existing = servers[index]
+    existing.baseURL = parsed.absoluteString
+    servers[index] = existing
+    return (existing, servers)
+  }
+  let server = SavedServer(label: parsed.host ?? urlString, baseURL: parsed.absoluteString)
+  servers.append(server)
+  return (server, servers)
 }
 
 public extension PreferencesClient {
   /// `UserDefaults`-backed implementation.
   static func live(defaults: UserDefaults = .standard) -> PreferencesClient {
     let key = "hermes.server-url"
+    let savedServersKey = "hermes.saved-servers"
+    let activeServerKey = "hermes.active-server-id"
     let seenKey = "hermes.seen-message-counts"
     let pinnedKey = "hermes.pinned-session-ids"
     let groupingKey = "hermes.session-grouping-mode"
@@ -69,10 +120,31 @@ public extension PreferencesClient {
     let pushSnoozeUntilKey = "hermes.push-prompt-snooze-until"
     // UserDefaults is documented thread-safe but not Sendable.
     nonisolated(unsafe) let store = defaults
+
+    @Sendable func loadSavedServersList() -> [SavedServer] {
+      guard let data = store.data(forKey: savedServersKey) else { return [] }
+      return (try? JSONDecoder().decode([SavedServer].self, from: data)) ?? []
+    }
+    @Sendable func persistSavedServersList(_ servers: [SavedServer]) {
+      if let data = try? JSONEncoder().encode(servers) {
+        store.set(data, forKey: savedServersKey)
+      }
+    }
+
     return PreferencesClient(
       loadServerURL: { store.string(forKey: key) },
-      saveServerURL: { store.set($0, forKey: key) },
+      saveServerURL: { url in
+        store.set(url, forKey: key)
+        let (server, updated) = upsertSavedServer(for: url, into: loadSavedServersList())
+        persistSavedServersList(updated)
+        store.set(server.id, forKey: activeServerKey)
+      },
       clearServerURL: { store.removeObject(forKey: key) },
+      loadSavedServers: loadSavedServersList,
+      saveSavedServers: persistSavedServersList,
+      loadActiveServerID: { store.string(forKey: activeServerKey) },
+      saveActiveServerID: { store.set($0, forKey: activeServerKey) },
+      clearActiveServerID: { store.removeObject(forKey: activeServerKey) },
       loadSeenCounts: { (store.dictionary(forKey: seenKey) as? [String: Int]) ?? [:] },
       saveSeenCounts: { store.set($0, forKey: seenKey) },
       loadPinnedIDs: { (store.array(forKey: pinnedKey) as? [String]) ?? [] },
@@ -111,6 +183,8 @@ public extension PreferencesClient {
   /// Deterministic in-memory store for previews and tests.
   static func inMemory() -> PreferencesClient {
     let box = LockIsolated<String?>(nil)
+    let savedServers = LockIsolated<[SavedServer]>([])
+    let activeServerID = LockIsolated<String?>(nil)
     let seen = LockIsolated<[String: Int]>([:])
     let pinned = LockIsolated<[String]>([])
     let grouping = LockIsolated<SessionGroupingMode>(.default)
@@ -120,8 +194,18 @@ public extension PreferencesClient {
     let pushSnooze = LockIsolated<(count: Int, until: Date)?>(nil)
     return PreferencesClient(
       loadServerURL: { box.value },
-      saveServerURL: { url in box.setValue(url) },
+      saveServerURL: { url in
+        box.setValue(url)
+        let (server, updated) = upsertSavedServer(for: url, into: savedServers.value)
+        savedServers.setValue(updated)
+        activeServerID.setValue(server.id)
+      },
       clearServerURL: { box.setValue(nil) },
+      loadSavedServers: { savedServers.value },
+      saveSavedServers: { savedServers.setValue($0) },
+      loadActiveServerID: { activeServerID.value },
+      saveActiveServerID: { activeServerID.setValue($0) },
+      clearActiveServerID: { activeServerID.setValue(nil) },
       loadSeenCounts: { seen.value },
       saveSeenCounts: { seen.setValue($0) },
       loadPinnedIDs: { pinned.value },

@@ -895,5 +895,71 @@ struct HermesRESTClientTests {
       try await makeClient().triggerCronJob(connection, "gone", nil)
     }
   }
+
+  @Test func skillsDecodesListAndThreadsProfile() async throws {
+    MockURLProtocol.set(json: #"{"skills":[{"name":"web","enabled":true}]}"#)
+    let skills = try await makeClient().skills(connection, "work")
+    #expect(skills.map(\.name) == ["web"])
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.url?.path == "/api/skills")
+    #expect(req.url?.query == "profile=work")
+  }
+
+  @Test func skillsMissingEndpointThrowsNotFound() async throws {
+    MockURLProtocol.set(status: 404)
+    await #expect(throws: RESTError.notFound) {
+      _ = try await makeClient().skills(connection, nil)
+    }
+  }
+
+  @Test func toggleSkillPutsBody() async throws {
+    MockURLProtocol.set(json: "{}")
+    try await makeClient().toggleSkill(connection, "web", false, nil)
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "PUT")
+    #expect(req.url?.path == "/api/skills/toggle")
+    let body = try JSONSerialization.jsonObject(with: #require(req.httpBody)) as? [String: Any]
+    #expect(body?["name"] as? String == "web")
+    #expect(body?["enabled"] as? Bool == false)
+  }
+
+  @Test func createCronJobPostsBody() async throws {
+    MockURLProtocol.set(json: #"{"id":"job1","name":"Morning","prompt":"hi","schedule_display":"0 9 * * *"}"#)
+    let job = try await makeClient().createCronJob(
+      connection,
+      CronJobWrite(prompt: "hi", schedule: "0 9 * * *", name: "Morning"),
+      nil
+    )
+    #expect(job.id == "job1")
+    #expect(MockURLProtocol.lastRequest?.httpMethod == "POST")
+    #expect(MockURLProtocol.lastRequest?.url?.path == "/api/cron/jobs")
+  }
+
+  @Test func configGetAndPut() async throws {
+    MockURLProtocol.set(json: #"{"config":{"model":{"default":"gpt-4o"}}}"#)
+    let config = try await makeClient().config(connection, nil)
+    #expect(AgentConfigDocument.value(at: "model.default", in: config)?.stringValue == "gpt-4o")
+
+    MockURLProtocol.set(json: "{}")
+    try await makeClient().putConfig(connection, config, "work")
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "PUT")
+    #expect(req.url?.path == "/api/config")
+    #expect(req.url?.query == "profile=work")
+  }
+
+  @Test func usageAnalyticsDecodes() async throws {
+    MockURLProtocol.set(json: #"{"total_tokens":1200,"total_cost":0.5,"session_count":3}"#)
+    let usage = try await makeClient().usageAnalytics(connection, 30)
+    #expect(usage.totalTokens == 1200)
+    #expect(MockURLProtocol.lastRequest?.url?.path == "/api/analytics/usage")
+  }
+
+  @Test func statusDecodesMemoryPressure() async throws {
+    MockURLProtocol.set(json: #"{"version":"0.2","gateway_running":true,"memory":{"pressure":"elevated","system_available_mb":100}}"#)
+    let status = try await makeClient().status(baseURL)
+    #expect(status.memory?.pressure == "elevated")
+    #expect(status.worstPressure == "elevated")
+  }
 }
 } // extension RESTTransportSuite

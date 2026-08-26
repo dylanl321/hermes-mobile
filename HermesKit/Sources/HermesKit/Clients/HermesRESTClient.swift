@@ -47,6 +47,10 @@ public struct ServerStatus: Equatable, Sendable, Decodable {
   public var authRequired: Bool?
   /// Provider names advertised by the server (e.g. `["basic"]`); absent on older servers.
   public var authProviders: [String]?
+  /// Advisory memory pressure from the gateway heartbeat (absent on older agents).
+  public var memory: ResourcePressure?
+  /// Advisory disk pressure for the `~/.hermes` volume (absent on older agents).
+  public var disk: ResourcePressure?
 
   enum CodingKeys: String, CodingKey {
     case version
@@ -55,6 +59,35 @@ public struct ServerStatus: Equatable, Sendable, Decodable {
     case activeSessions = "active_sessions"
     case authRequired = "auth_required"
     case authProviders = "auth_providers"
+    case memory, disk
+  }
+
+  public init(
+    version: String? = nil,
+    gatewayRunning: Bool? = nil,
+    gatewayState: String? = nil,
+    activeSessions: Int? = nil,
+    authRequired: Bool? = nil,
+    authProviders: [String]? = nil,
+    memory: ResourcePressure? = nil,
+    disk: ResourcePressure? = nil
+  ) {
+    self.version = version
+    self.gatewayRunning = gatewayRunning
+    self.gatewayState = gatewayState
+    self.activeSessions = activeSessions
+    self.authRequired = authRequired
+    self.authProviders = authProviders
+    self.memory = memory
+    self.disk = disk
+  }
+
+  /// Highest-severity pressure label for the home ops strip (`critical` > `elevated`).
+  public var worstPressure: String? {
+    let levels = [memory?.pressure, disk?.pressure].compactMap { $0?.lowercased() }
+    if levels.contains("critical") { return "critical" }
+    if levels.contains("elevated") { return "elevated" }
+    return nil
   }
 }
 
@@ -131,7 +164,7 @@ public enum RESTError: Error, Equatable, Sendable {
 @DependencyClient
 public struct HermesRESTClient: Sendable {
   /// Unauthenticated reachability/health probe.
-  public var status: @Sendable (_ baseURL: URL) async throws -> ServerStatus
+  public var status: @Sendable (_ baseURL: URL) async throws -> ServerStatus = { _ in ServerStatus() }
   /// Public capability probe — `GET /api/auth/providers` → `[{name, display_name,
   /// supports_password}]`. Returns `nil` on older servers that 404 this endpoint (treat as
   /// token-only); other transport/HTTP errors still throw.
@@ -216,6 +249,92 @@ public struct HermesRESTClient: Sendable {
   /// `RESTError` — the agent answers 400 with a `detail` (not a git checkout, no remote,
   /// non-fast-forward, git missing) that `RESTError.server` carries verbatim.
   public var updatePushPlugin: @Sendable (_ connection: ServerConnection) async throws -> PushPluginUpdateResult
+
+  // MARK: Management (dashboard API)
+
+  /// Installed skills — `GET /api/skills`. Pass `profile` (non-default) to scope; `nil` omits.
+  /// Missing endpoint → `RESTError.notFound` for capability gating.
+  public var skills: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> [Skill] = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Enable/disable a skill — `PUT /api/skills/toggle` `{name, enabled, profile?}`.
+  public var toggleSkill: @Sendable (_ connection: ServerConnection, _ name: String, _ enabled: Bool, _ profile: String?) async throws -> Void = { _, _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Search the skills hub — `GET /api/skills/hub/search?q=`.
+  public var searchSkillHub: @Sendable (_ connection: ServerConnection, _ query: String, _ profile: String?) async throws -> [SkillHubHit] = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Hub install/uninstall/update — `POST /api/skills/hub/{action}` (backgrounded).
+  /// Returns an action name to poll via `actionStatus` when the server provides one.
+  public var skillHubAction: @Sendable (_ connection: ServerConnection, _ action: String, _ name: String, _ profile: String?) async throws -> String? = { _, _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Poll a background dashboard action — `GET /api/actions/{name}/status`.
+  public var actionStatus: @Sendable (_ connection: ServerConnection, _ name: String) async throws -> DashboardActionStatus = { _, _ in
+    throw RESTError.notFound
+  }
+
+  /// Create a cron job — `POST /api/cron/jobs`.
+  public var createCronJob: @Sendable (_ connection: ServerConnection, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Edit a cron job — `PUT /api/cron/jobs/{id}`.
+  public var updateCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob = { _, _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Delete a cron job — `DELETE /api/cron/jobs/{id}`.
+  public var deleteCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ profile: String?) async throws -> Void = { _, _, _ in
+    throw RESTError.notFound
+  }
+
+  /// Current `config.yaml` as JSON — `GET /api/config`.
+  public var config: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> JSONValue = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Save config — `PUT /api/config` `{"config":…, "profile"?}`.
+  public var putConfig: @Sendable (_ connection: ServerConnection, _ config: JSONValue, _ profile: String?) async throws -> Void = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Model options from the dashboard REST API — `GET /api/model/options`.
+  public var modelOptionsREST: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> ModelOptions = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Set the default model — `POST /api/model/set` `{model, provider?, profile?}`.
+  public var setModel: @Sendable (_ connection: ServerConnection, _ model: String, _ provider: String?, _ profile: String?) async throws -> Void = { _, _, _, _ in
+    throw RESTError.notFound
+  }
+
+  /// Usage analytics — `GET /api/analytics/usage?days=`. Missing → `RESTError.notFound`.
+  public var usageAnalytics: @Sendable (_ connection: ServerConnection, _ days: Int) async throws -> UsageAnalytics = { _, _ in
+    throw RESTError.notFound
+  }
+}
+
+/// Body for create/update cron job REST calls.
+public struct CronJobWrite: Equatable, Sendable {
+  public var prompt: String
+  public var schedule: String
+  public var name: String?
+  public var deliver: String?
+
+  public init(prompt: String, schedule: String, name: String? = nil, deliver: String? = nil) {
+    self.prompt = prompt
+    self.schedule = schedule
+    self.name = name
+    self.deliver = deliver
+  }
+
+  public func jsonObject(profile: String?) -> [String: Any] {
+    var payload: [String: Any] = [
+      "prompt": prompt,
+      "schedule": schedule,
+    ]
+    if let name, !name.isEmpty { payload["name"] = name }
+    if let deliver, !deliver.isEmpty { payload["deliver"] = deliver }
+    if let profile { payload["profile"] = profile }
+    return payload
+  }
 }
 
 public extension HermesRESTClient {
@@ -381,6 +500,94 @@ public extension HermesRESTClient {
         }
         // Absent `unchanged` (older agent) → assume something changed and ask for the restart.
         return PushPluginUpdateResult(unchanged: response.unchanged ?? false)
+      },
+      skills: { conn, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/skills", query: query)
+        let response: SkillsListResponse = try await get(url, token: conn.token, session: session)
+        return response.skills
+      },
+      toggleSkill: { conn, name, enabled, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/skills/toggle", query: query)
+        var payload: [String: Any] = ["name": name, "enabled": enabled]
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        try await send(url, method: "PUT", body: body, token: conn.token, session: session)
+      },
+      searchSkillHub: { conn, query, profile in
+        var items = [URLQueryItem(name: "q", value: query)]
+        if let profile { items.append(URLQueryItem(name: "profile", value: profile)) }
+        let url = try makeURL(conn.baseURL, "/api/skills/hub/search", query: items)
+        let response: SkillHubSearchResponse = try await get(url, token: conn.token, session: session)
+        return response.results
+      },
+      skillHubAction: { conn, action, name, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/skills/hub/\(action)", query: query)
+        var payload: [String: Any] = ["name": name]
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let response: SkillHubActionResponse = try await postJSON(
+          url, body: body, token: conn.token, session: session
+        )
+        return response.actionName
+      },
+      actionStatus: { conn, name in
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let url = try makeURL(conn.baseURL, "/api/actions/\(encoded)/status")
+        return try await get(url, token: conn.token, session: session)
+      },
+      createCronJob: { conn, write, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/cron/jobs", query: query)
+        let body = try JSONSerialization.data(withJSONObject: write.jsonObject(profile: profile))
+        return try await postJSON(url, body: body, token: conn.token, session: session)
+      },
+      updateCronJob: { conn, id, write, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/cron/jobs/\(id)", query: query)
+        let body = try JSONSerialization.data(withJSONObject: write.jsonObject(profile: profile))
+        return try await putJSON(url, body: body, token: conn.token, session: session)
+      },
+      deleteCronJob: { conn, id, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/cron/jobs/\(id)", query: query)
+        try await send(url, method: "DELETE", body: nil, token: conn.token, session: session)
+      },
+      config: { conn, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/config", query: query)
+        let response: ConfigResponse = try await get(url, token: conn.token, session: session)
+        return response.config
+      },
+      putConfig: { conn, config, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/config", query: query)
+        var payload: [String: JSONValue] = ["config": config]
+        if let profile { payload["profile"] = .string(profile) }
+        let body = try JSONEncoder().encode(payload)
+        try await send(url, method: "PUT", body: body, token: conn.token, session: session)
+      },
+      modelOptionsREST: { conn, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/model/options", query: query)
+        return try await get(url, token: conn.token, session: session)
+      },
+      setModel: { conn, model, provider, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/model/set", query: query)
+        var payload: [String: Any] = ["model": model]
+        if let provider { payload["provider"] = provider }
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        try await send(url, method: "POST", body: body, token: conn.token, session: session)
+      },
+      usageAnalytics: { conn, days in
+        let url = try makeURL(conn.baseURL, "/api/analytics/usage", query: [
+          .init(name: "days", value: String(days)),
+        ])
+        return try await get(url, token: conn.token, session: session)
       }
     )
   }
@@ -532,8 +739,21 @@ func serverDetail(from data: Data) -> String? {
 func postJSON<T: Decodable>(
   _ url: URL, body: Data, token: String?, session: URLSession
 ) async throws -> T {
+  try await jsonRequest(url, method: "POST", body: body, token: token, session: session)
+}
+
+/// PUT a JSON body and decode the response.
+func putJSON<T: Decodable>(
+  _ url: URL, body: Data, token: String?, session: URLSession
+) async throws -> T {
+  try await jsonRequest(url, method: "PUT", body: body, token: token, session: session)
+}
+
+func jsonRequest<T: Decodable>(
+  _ url: URL, method: String, body: Data, token: String?, session: URLSession
+) async throws -> T {
   var request = URLRequest(url: url)
-  request.httpMethod = "POST"
+  request.httpMethod = method
   request.httpBody = body
   request.setValue("application/json", forHTTPHeaderField: "Content-Type")
   if let token { request.setValue(token, forHTTPHeaderField: "X-Hermes-Session-Token") }
@@ -738,4 +958,64 @@ private func fetchPushPluginInfo(
     // can't tell. `.unknown` leaves the capability as-is and offers no update.
     return PushPluginInfo(status: .unknown)
   }
+}
+
+// MARK: - Management DTOs
+
+private struct SkillsListResponse: Decodable {
+  let skills: [Skill]
+
+  init(from decoder: Decoder) throws {
+    if let array = try? [Skill](from: decoder) {
+      skills = array
+      return
+    }
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    skills = (try? c.decodeIfPresent([Skill].self, forKey: .skills)) ?? []
+  }
+
+  enum CodingKeys: String, CodingKey { case skills }
+}
+
+private struct SkillHubSearchResponse: Decodable {
+  let results: [SkillHubHit]
+
+  init(from decoder: Decoder) throws {
+    if let array = try? [SkillHubHit](from: decoder) {
+      results = array
+      return
+    }
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    results = (try? c.decodeIfPresent([SkillHubHit].self, forKey: .results))
+      ?? (try? c.decodeIfPresent([SkillHubHit].self, forKey: .skills))
+      ?? []
+  }
+
+  enum CodingKeys: String, CodingKey { case results, skills }
+}
+
+private struct SkillHubActionResponse: Decodable {
+  let action: String?
+  let name: String?
+  let ok: Bool?
+
+  var actionName: String? { action ?? name }
+
+  enum CodingKeys: String, CodingKey { case action, name, ok }
+}
+
+/// `GET /api/config` may return `{config:…}` or the bare config object.
+private struct ConfigResponse: Decodable {
+  let config: JSONValue
+
+  init(from decoder: Decoder) throws {
+    if let wrapped = try? decoder.container(keyedBy: CodingKeys.self),
+       let config = try? wrapped.decode(JSONValue.self, forKey: .config) {
+      self.config = config
+      return
+    }
+    self.config = try JSONValue(from: decoder)
+  }
+
+  enum CodingKeys: String, CodingKey { case config }
 }

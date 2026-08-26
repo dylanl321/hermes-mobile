@@ -36,3 +36,4 @@ build/
 # the local machine's skills/tools inventory + home paths. Keep out of git.
 Probe/fixtures/
 /tmp/hermes-probe
+__pycache__/
