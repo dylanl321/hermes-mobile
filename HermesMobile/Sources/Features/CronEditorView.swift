@@ -61,28 +61,28 @@ struct CronEditorView: View {
   private var nameBinding: Binding<String> {
     Binding(
       get: { store.cronEditor?.name ?? "" },
-      set: { store.cronEditor?.name = $0 }
+      set: { store.send(.cronEditorBinding(.name($0))) }
     )
   }
 
   private var promptBinding: Binding<String> {
     Binding(
       get: { store.cronEditor?.prompt ?? "" },
-      set: { store.cronEditor?.prompt = $0 }
+      set: { store.send(.cronEditorBinding(.prompt($0))) }
     )
   }
 
   private var scheduleBinding: Binding<String> {
     Binding(
       get: { store.cronEditor?.schedule ?? "" },
-      set: { store.cronEditor?.schedule = $0 }
+      set: { store.send(.cronEditorBinding(.schedule($0))) }
     )
   }
 
   private var deliverBinding: Binding<String> {
     Binding(
       get: { store.cronEditor?.deliver ?? "" },
-      set: { store.cronEditor?.deliver = $0 }
+      set: { store.send(.cronEditorBinding(.deliver($0))) }
     )
   }
 }

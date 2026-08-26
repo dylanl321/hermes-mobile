@@ -30,6 +30,13 @@ public struct CronEditorState: Equatable, Sendable, Identifiable {
 
   public var navigationTitle: String { isEdit ? "Edit cron job" : "New cron job" }
 
+  public enum Field: Equatable, Sendable {
+    case name(String)
+    case prompt(String)
+    case schedule(String)
+    case deliver(String)
+  }
+
   /// Save is enabled when the required REST fields are non-empty and no save is in flight.
   public var canSave: Bool {
     !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -596,6 +603,8 @@ public struct SessionListFeature {
     case cronEditorDismissed
     /// Commit create or update from the cron editor sheet.
     case cronEditorSaveTapped
+    /// Field edits in the cron editor sheet.
+    case cronEditorBinding(CronEditorState.Field)
     /// Ask to permanently delete a cron job (presents the confirmation dialog).
     case deleteCronTapped(id: String)
     /// A cron create/update/delete mutation finished — refetch jobs on success; surface
@@ -823,6 +832,16 @@ public struct SessionListFeature {
 
       case .cronEditorDismissed:
         state.cronEditor = nil
+        return .none
+
+      case let .cronEditorBinding(field):
+        guard state.cronEditor != nil else { return .none }
+        switch field {
+        case let .name(value): state.cronEditor?.name = value
+        case let .prompt(value): state.cronEditor?.prompt = value
+        case let .schedule(value): state.cronEditor?.schedule = value
+        case let .deliver(value): state.cronEditor?.deliver = value
+        }
         return .none
 
       case .cronEditorSaveTapped:
