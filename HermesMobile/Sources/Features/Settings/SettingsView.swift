@@ -61,12 +61,21 @@ struct SettingsView: View {
 
   @ViewBuilder
   private var managementSection: some View {
-    if store.skillsSupported {
+    if store.skillsSupported || store.fsSupported {
       Section("Management") {
-        Button {
-          store.send(.openSkillsTapped)
-        } label: {
-          Label("Skills", systemImage: "puzzlepiece.extension")
+        if store.skillsSupported {
+          Button {
+            store.send(.openSkillsTapped)
+          } label: {
+            Label("Skills", systemImage: "puzzlepiece.extension")
+          }
+        }
+        if store.fsSupported {
+          Button {
+            store.send(.openWorkspacesTapped)
+          } label: {
+            Label("Workspaces", systemImage: "folder")
+          }
         }
       }
     }
