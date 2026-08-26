@@ -254,32 +254,56 @@ public struct HermesRESTClient: Sendable {
 
   /// Installed skills — `GET /api/skills`. Pass `profile` (non-default) to scope; `nil` omits.
   /// Missing endpoint → `RESTError.notFound` for capability gating.
-  public var skills: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> [Skill]
+  public var skills: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> [Skill] = { _, _ in
+    throw RESTError.notFound
+  }
   /// Enable/disable a skill — `PUT /api/skills/toggle` `{name, enabled, profile?}`.
-  public var toggleSkill: @Sendable (_ connection: ServerConnection, _ name: String, _ enabled: Bool, _ profile: String?) async throws -> Void
+  public var toggleSkill: @Sendable (_ connection: ServerConnection, _ name: String, _ enabled: Bool, _ profile: String?) async throws -> Void = { _, _, _, _ in
+    throw RESTError.notFound
+  }
   /// Search the skills hub — `GET /api/skills/hub/search?q=`.
-  public var searchSkillHub: @Sendable (_ connection: ServerConnection, _ query: String, _ profile: String?) async throws -> [SkillHubHit]
+  public var searchSkillHub: @Sendable (_ connection: ServerConnection, _ query: String, _ profile: String?) async throws -> [SkillHubHit] = { _, _, _ in
+    throw RESTError.notFound
+  }
   /// Hub install/uninstall/update — `POST /api/skills/hub/{action}` (backgrounded).
   /// Returns an action name to poll via `actionStatus` when the server provides one.
-  public var skillHubAction: @Sendable (_ connection: ServerConnection, _ action: String, _ name: String, _ profile: String?) async throws -> String?
+  public var skillHubAction: @Sendable (_ connection: ServerConnection, _ action: String, _ name: String, _ profile: String?) async throws -> String? = { _, _, _, _ in
+    throw RESTError.notFound
+  }
   /// Poll a background dashboard action — `GET /api/actions/{name}/status`.
-  public var actionStatus: @Sendable (_ connection: ServerConnection, _ name: String) async throws -> DashboardActionStatus
+  public var actionStatus: @Sendable (_ connection: ServerConnection, _ name: String) async throws -> DashboardActionStatus = { _, _ in
+    throw RESTError.notFound
+  }
 
   /// Create a cron job — `POST /api/cron/jobs`.
-  public var createCronJob: @Sendable (_ connection: ServerConnection, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob
+  public var createCronJob: @Sendable (_ connection: ServerConnection, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob = { _, _, _ in
+    throw RESTError.notFound
+  }
   /// Edit a cron job — `PUT /api/cron/jobs/{id}`.
-  public var updateCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob
+  public var updateCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ body: CronJobWrite, _ profile: String?) async throws -> CronJob = { _, _, _, _ in
+    throw RESTError.notFound
+  }
   /// Delete a cron job — `DELETE /api/cron/jobs/{id}`.
-  public var deleteCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ profile: String?) async throws -> Void
+  public var deleteCronJob: @Sendable (_ connection: ServerConnection, _ id: String, _ profile: String?) async throws -> Void = { _, _, _ in
+    throw RESTError.notFound
+  }
 
   /// Current `config.yaml` as JSON — `GET /api/config`.
-  public var config: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> JSONValue
+  public var config: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> JSONValue = { _, _ in
+    throw RESTError.notFound
+  }
   /// Save config — `PUT /api/config` `{"config":…, "profile"?}`.
-  public var putConfig: @Sendable (_ connection: ServerConnection, _ config: JSONValue, _ profile: String?) async throws -> Void
+  public var putConfig: @Sendable (_ connection: ServerConnection, _ config: JSONValue, _ profile: String?) async throws -> Void = { _, _, _ in
+    throw RESTError.notFound
+  }
   /// Model options from the dashboard REST API — `GET /api/model/options`.
-  public var modelOptionsREST: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> ModelOptions
+  public var modelOptionsREST: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> ModelOptions = { _, _ in
+    throw RESTError.notFound
+  }
   /// Set the default model — `POST /api/model/set` `{model, provider?, profile?}`.
-  public var setModel: @Sendable (_ connection: ServerConnection, _ model: String, _ provider: String?, _ profile: String?) async throws -> Void
+  public var setModel: @Sendable (_ connection: ServerConnection, _ model: String, _ provider: String?, _ profile: String?) async throws -> Void = { _, _, _, _ in
+    throw RESTError.notFound
+  }
 
   /// Usage analytics — `GET /api/analytics/usage?days=`. Missing → `RESTError.notFound`.
   public var usageAnalytics: @Sendable (_ connection: ServerConnection, _ days: Int) async throws -> UsageAnalytics = { _, _ in
