@@ -176,6 +176,8 @@ struct SessionListCronTests {
     await store.receive(\.cronJobsResponse.success) {
       $0.cronJobs = [CronJob(id: "job1", name: "Digest")]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     // Profile-scoped agents get the LITERAL selected name (matching the scoped session list).
     #expect(requestedProfile.value == "work")
   }
@@ -204,6 +206,8 @@ struct SessionListCronTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
 
     // The flag is definitive: the next refresh fetches sessions only.
     await store.send(.pulledToRefresh) {
@@ -212,6 +216,7 @@ struct SessionListCronTests {
     await store.receive(\.sessionsResponse.success) {
       $0.isLoading = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
     #expect(fetchCount.value == 1)
   }
 
@@ -237,8 +242,11 @@ struct SessionListCronTests {
     await store.receive(\.sessionsResponse.success) {
       $0.isLoading = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
     // No state change: previous jobs survive a transient failure (no section flapping).
     await store.receive(\.cronJobsResponse.failure)
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(store.state.cronJobs == [CronJob(id: "job1", name: "Digest")])
     #expect(store.state.cronJobsSupported)
   }
@@ -265,6 +273,8 @@ struct SessionListCronTests {
       $0.isLoading = false
     }
     await store.receive(\.cronJobsResponse.success)
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(requestedProfile.value == nil)
   }
 
@@ -316,6 +326,8 @@ struct SessionListCronTests {
     await store.receive(\.cronJobsResponse.success) {
       $0.cronJobs = [CronJob(id: "job1", state: "running")]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(triggered.value == "job1")
   }
 
@@ -343,6 +355,8 @@ struct SessionListCronTests {
     await store.receive(\.cronJobsResponse.success) {
       $0.cronJobs = [CronJob(id: "job1", state: "paused")]  // server-reconciled, not optimistic
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func resumeSuccessRefetchesJobsOnly() async {
@@ -367,6 +381,8 @@ struct SessionListCronTests {
     await store.receive(\.cronJobsResponse.success) {
       $0.cronJobs = [CronJob(id: "job1", state: "scheduled")]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func actionFailureSurfacesBannerAndKeepsState() async {

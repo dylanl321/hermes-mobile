@@ -370,6 +370,11 @@ public struct SessionListFeature {
       return cronSessions.filter { unread.contains($0.id) }.count
     }
 
+    /// Whether the home ops strip has anything to show (gateway status and/or analytics).
+    public var opsStripVisible: Bool {
+      serverStatus != nil || (analyticsSupported && usageAnalytics != nil)
+    }
+
     /// Desktop-parity job ordering: soonest next run first, jobs without a next run sink
     /// to the bottom, then title for stability.
     private static func cronJobOrder(_ a: CronJob, _ b: CronJob) -> Bool {

@@ -202,7 +202,9 @@ enum DemoMode {
       groupingMode: .chronological,
       cronJobs: IdentifiedArray(uniqueElements: seededCronJobs),
       // The digest's peek starts open so the panel shows job → runs at a glance.
-      expandedCronJobID: "digest01"
+      expandedCronJobID: "digest01",
+      serverStatus: ServerStatus(version: "0.16.0", gatewayState: "running"),
+      usageAnalytics: UsageAnalytics(totalTokens: 48_000, totalCost: 2.15, sessionCount: 12)
     )
   }
 

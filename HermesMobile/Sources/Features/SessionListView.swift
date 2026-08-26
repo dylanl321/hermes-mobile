@@ -114,6 +114,12 @@ struct SessionListView: View {
         AddProfileView(store: addProfileStore)
       }
     }
+    .sheet(isPresented: Binding(
+      get: { store.cronEditor != nil },
+      set: { presented in if !presented { store.send(.cronEditorDismissed) } }
+    )) {
+      CronEditorView(store: store)
+    }
     // Push onboarding info sheet — raised by the reducer when the plugin isn't ready and the
     // prompt isn't snoozed. Its two buttons send `SessionListFeature` actions.
     .sheet(isPresented: $store.showPushSetupSheet) {
@@ -135,6 +141,9 @@ struct SessionListView: View {
     // Top-level "Sessions" section header. Future sibling areas (e.g. "Cron jobs")
     // render their own header the same way, all scoped to the active profile pill.
     sessionsSectionHeader
+    if store.opsStripVisible {
+      opsStrip
+    }
     // Pinned sessions float to the top in both grouping modes.
     if !store.pinnedSessions.isEmpty {
       Section("Pinned") {
@@ -157,8 +166,9 @@ struct SessionListView: View {
     }
     // Cron-scheduled sessions live in their own always-on section below the
     // interactive list, in both grouping modes (filtered out of pinned/groups/
-    // chronological by the reducer). Hidden when there are none.
-    if !store.cronSessions.isEmpty {
+    // chronological by the reducer). Shown when there are runs OR when cron CRUD
+    // is supported (so the "+" affordance is reachable before the first job exists).
+    if !store.cronSessions.isEmpty || store.cronJobsSupported {
       cronJobsSection
     }
   }
@@ -172,6 +182,52 @@ struct SessionListView: View {
       .listRowSeparator(.hidden)
       .listRowBackground(Color.clear)
       .accessibilityAddTraits(.isHeader)
+  }
+
+  /// Compact gateway health + usage summary above the session rows.
+  private var opsStrip: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 8) {
+        if let version = store.serverStatus?.version {
+          Text("v\(version)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        if let state = store.serverStatus?.gatewayState {
+          Text(state.capitalized)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        if let pressure = store.serverStatus?.worstPressure {
+          Text(pressure.capitalized)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(pressureColor(pressure), in: Capsule())
+            .foregroundStyle(.white)
+            .accessibilityLabel("\(pressure) resource pressure")
+        }
+        Spacer()
+      }
+      if store.analyticsSupported, let analytics = store.usageAnalytics {
+        Text(analytics.summaryLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+    }
+    .padding(.vertical, 4)
+    .listRowSeparator(.hidden)
+    .listRowBackground(Color.clear)
+    .accessibilityElement(children: .combine)
+  }
+
+  private func pressureColor(_ pressure: String) -> Color {
+    switch pressure.lowercased() {
+    case "critical": .red
+    case "elevated": .orange
+    default: Color(.systemGray)
+    }
   }
 
   /// Always-on "Cron Jobs" section. When the agent exposes `/api/cron/jobs` the rows are
@@ -228,6 +284,17 @@ struct SessionListView: View {
           .accessibilityLabel("\(store.cronUnreadCount) unread cron runs")
       }
       Spacer()
+      if store.cronJobsSupported {
+        Button {
+          store.send(.createCronTapped)
+        } label: {
+          Image(systemName: "plus.circle.fill")
+            .font(.title3)
+            .symbolRenderingMode(.hierarchical)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Create cron job")
+      }
     }
     .listRowSeparator(.hidden)
     .listRowBackground(Color.clear)
@@ -286,6 +353,14 @@ struct SessionListView: View {
       } else {
         Button("Pause", systemImage: "pause.circle") {
           store.send(.pauseCronJob(id: group.id))
+        }
+      }
+      if store.cronJobsSupported {
+        Button("Edit", systemImage: "pencil") {
+          store.send(.editCronTapped(id: group.id))
+        }
+        Button("Delete", systemImage: "trash", role: .destructive) {
+          store.send(.deleteCronTapped(id: group.id))
         }
       }
     }

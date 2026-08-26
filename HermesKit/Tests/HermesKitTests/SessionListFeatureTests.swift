@@ -40,6 +40,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.send(.onDisappear) // cancels the auto-poll loop
   }
 
@@ -69,6 +71,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.send(.onDisappear) // cancels the auto-poll loop
   }
 
@@ -107,6 +111,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(fetchCount.value == 1)
 
     // Advancing the clock by the interval fires a poll tick → refresh → re-fetch.
@@ -118,6 +124,7 @@ struct SessionListFeatureTests {
     await store.receive(\.sessionsResponse.success) {
       $0.isLoading = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
     #expect(fetchCount.value == 2)
 
     // Disappearing cancels the loop — advancing further triggers no more refreshes.
@@ -183,6 +190,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func searchIsCancelledOnDisappear() async {
@@ -224,6 +233,7 @@ struct SessionListFeatureTests {
       $0.sessions = [Session(id: "r1", title: nil, preview: "foo")]
       $0.seenCounts = ["r1": 0]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
   }
 
   // MARK: Duplicate ids in the server response (#78)
@@ -305,6 +315,7 @@ struct SessionListFeatureTests {
       ]
       $0.seenCounts = ["r1": 0, "r2": 0]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
   }
 
   /// Same hardening for profiles: a duplicate `name` in `GET /api/profiles` (both the
@@ -339,6 +350,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
 
     await store.send(.profilesRefreshed(duplicated))
     #expect(store.state.profiles.map(\.id) == ["default", "work"])
@@ -708,6 +721,7 @@ struct SessionListFeatureTests {
       ]
       $0.seenCounts = ["branch": 0, "other": 0, "parent": 0]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
     // Search renders `sessions` directly (flat, server relevance order) — a branch in the
     // results is NOT regrouped under its parent.
     #expect(store.state.isSearching)
@@ -745,6 +759,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.send(.onDisappear) // cancels the auto-poll loop
   }
 
@@ -928,6 +944,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.finish()
     #expect(store.state.sessions.map(\.id) == ["b"])
   }
@@ -1439,6 +1457,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.finish()
   }
 
@@ -1472,6 +1492,7 @@ struct SessionListFeatureTests {
       $0.isLoading = false
       $0.seenCounts = ["b": 0]
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
     await store.finish()
     #expect(searched.value == ["plan"]) // the ACTIVE query re-ran, not a plain list load
   }
@@ -1643,6 +1664,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func archiveSuccessAfterClearingSearchRestartsThePendingReload() async {
@@ -1685,6 +1708,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.finish()
   }
 
@@ -1719,6 +1744,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   // MARK: Rename (optimistic + rollback, mirroring archive)
@@ -1801,6 +1828,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func renameFailureRestoresPreviousTitleAndSetsError() async {
@@ -2201,6 +2230,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
   }
 
   @Test func settingsTokenSavedUpdatesConnection() async {
@@ -2260,6 +2291,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     await store.send(.onDisappear)
   }
 
@@ -2602,6 +2635,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(scopedFetch.value == ["work"]) // scoped to the active profile
     await store.send(.onDisappear)
   }
@@ -2637,6 +2672,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(store.state.profilesSupported == false)
     #expect(unscopedFetch.value == 1) // today's /api/sessions, not the scoped endpoint
     await store.send(.onDisappear)
@@ -2681,6 +2718,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(prefs.loadSelectedProfileID() == "work") // persisted
     #expect(scopedFetch.value == ["work"]) // refetched scoped to the new profile
 
@@ -2730,6 +2769,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(prefs.loadSelectedProfileID() == "fresh")
   }
 
@@ -2786,6 +2827,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(deleted.value == ["work"])
     #expect(prefs.loadSelectedProfileID() == "default")
   }
@@ -2884,6 +2927,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
     #expect(prefs.loadSelectedProfileID() == "default") // persisted re-home
     #expect(scopedFetch.value == ["default"]) // scoped to default
     await store.send(.onDisappear)
@@ -3161,6 +3206,8 @@ struct SessionListFeatureTests {
     await store.receive(\.cronJobsResponse.failure) {
       $0.cronJobsSupported = false
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
+
 
     // The agent starts working this session elsewhere; the next poll observes it.
     active.setValue(true)
@@ -3171,6 +3218,7 @@ struct SessionListFeatureTests {
       $0.isLoading = false
       $0.sessions = [Session(id: "s1", isActive: true)] // glow lit by the poll backstop
     }
+    await SessionListLoadTestSupport.receiveOpsProbes(store)
 
     await store.send(.onDisappear)
   }
