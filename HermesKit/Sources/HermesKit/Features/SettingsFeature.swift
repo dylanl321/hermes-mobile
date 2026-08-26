@@ -47,7 +47,9 @@ public struct SettingsFeature {
     public var profile: String?
     /// Optimistic: hide Skills after a definitive missing-endpoint verdict.
     public var skillsSupported: Bool
-    public var skills: SkillsFeature.State?
+    /// Pushed via `navigationDestination` from Settings — `@Presents` so the view can
+    /// bind `$store.scope` (expects `PresentationAction`).
+    @Presents public var skills: SkillsFeature.State?
     /// Optimistic: hide Quick edits after config 404.
     public var configSupported: Bool
     public var configDocument: JSONValue?
@@ -195,7 +197,7 @@ public struct SettingsFeature {
     /// User picked a different default swipe action for session rows.
     case defaultSwipeActionChanged(SessionSwipeAction)
     case openSkillsTapped
-    case skills(SkillsFeature.Action)
+    case skills(PresentationAction<SkillsFeature.Action>)
     case configResponse(Result<JSONValue, RESTError>)
     case setConfigBool(ConfigQuickEditKey, Bool)
     case setConfigString(ConfigQuickEditKey, String)
@@ -451,7 +453,7 @@ public struct SettingsFeature {
         )
         return .none
 
-      case let .skills(.delegate(.skillsUnsupported)):
+      case .skills(.presented(.delegate(.skillsUnsupported))):
         state.skillsSupported = false
         state.skills = nil
         return .none
@@ -553,7 +555,7 @@ public struct SettingsFeature {
         return .none
       }
     }
-    .ifLet(\.skills, action: \.skills) {
+    .ifLet(\.$skills, action: \.skills) {
       SkillsFeature()
     }
   }
