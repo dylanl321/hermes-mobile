@@ -28,6 +28,8 @@ public struct ConnectionFeature {
     public var token: String
     public var username: String
     public var password: String
+    /// Saved dashboard servers for the onboarding picker.
+    public var savedServers: [SavedServer]
     /// The user's selected auth segment. Preselected from the capability probe; the user
     /// may still switch to whichever segment is enabled.
     public var method: AuthMethod
@@ -41,6 +43,7 @@ public struct ConnectionFeature {
       token: String = "",
       username: String = "",
       password: String = "",
+      savedServers: [SavedServer] = [],
       method: AuthMethod = .token,
       capability: ServerAuthCapability? = nil,
       status: Status = .idle
@@ -49,6 +52,7 @@ public struct ConnectionFeature {
       self.token = token
       self.username = username
       self.password = password
+      self.savedServers = savedServers
       self.method = method
       self.capability = capability
       self.status = status
@@ -111,6 +115,8 @@ public struct ConnectionFeature {
     case checkServer
     /// The URL field was submitted or lost focus — check immediately.
     case serverFieldCommitted
+    /// User picked a saved server from the onboarding list.
+    case savedServerSelected(SavedServer)
     case connectTapped
     /// `/api/status` result plus the (optional) `/api/auth/providers` probe, folded so the
     /// capability is computed in one place.
@@ -155,6 +161,7 @@ public struct ConnectionFeature {
         return .none
 
       case .onAppear:
+        state.savedServers = preferences.loadSavedServers()
         // A pre-filled URL (launch auto-connect fallback / logout) is validated immediately
         // so the sign-in step unlocks without the user having to focus the field first (#38).
         // Reuses the field-driven check path — no duplicated validation logic. Only fires
@@ -168,6 +175,25 @@ public struct ConnectionFeature {
       case .serverFieldCommitted:
         // Submit / focus-loss → check now, pre-empting the debounce.
         return .merge(.cancel(id: CancelID.urlDebounce), .send(.checkServer))
+
+      case let .savedServerSelected(server):
+        state.serverURL = server.baseURL
+        state.status = .idle
+        state.capability = nil
+        state.token = ""
+        state.username = ""
+        state.password = ""
+        if let session = keychain.loadSessionForServer(server.id, .shared) {
+          switch session {
+          case let .token(tok):
+            state.token = tok
+            state.method = .token
+          case let .cookie(cookieSession):
+            state.username = cookieSession.username
+            state.method = .password
+          }
+        }
+        return .send(.checkServer)
 
       case .checkServer:
         guard let url = parseServerURL(state.serverURL) else {
@@ -235,6 +261,9 @@ public struct ConnectionFeature {
             }
             try? keychain.saveSession(.token(connection.token ?? ""))
             preferences.saveServerURL(connection.baseURL.absoluteString)
+            if let serverID = preferences.loadActiveServerID() {
+              try? keychain.saveSessionForServer(serverID, .token(connection.token ?? ""))
+            }
             await send(.tokenValidationResponse(.success(connection)))
           }
 
@@ -264,6 +293,9 @@ public struct ConnectionFeature {
             }
             try? keychain.saveSession(.cookie(cookieSession))
             preferences.saveServerURL(connection.baseURL.absoluteString)
+            if let serverID = preferences.loadActiveServerID() {
+              try? keychain.saveSessionForServer(serverID, .cookie(cookieSession))
+            }
             await send(.passwordLoginResponse(.success(connection)))
           }
         }
@@ -314,4 +346,17 @@ func parseServerURL(_ string: String) -> URL? {
   let withScheme = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
   guard let url = URL(string: withScheme), url.host?.isEmpty == false else { return nil }
   return url
+}
+
+/// Stable server identity for matching saved entries: scheme + host + port.
+func normalizedServerIdentity(_ url: URL) -> String {
+  let scheme = url.scheme?.lowercased() ?? ""
+  let host = url.host?.lowercased() ?? ""
+  let port = url.port.map(String.init) ?? ""
+  return "\(scheme)://\(host):\(port)"
+}
+
+/// Whether two URLs refer to the same Hermes server (ignoring path/trailing slash/casing).
+func isSameHermesServer(_ a: URL, _ b: URL) -> Bool {
+  normalizedServerIdentity(a) == normalizedServerIdentity(b)
 }

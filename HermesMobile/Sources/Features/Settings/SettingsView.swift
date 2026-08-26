@@ -17,6 +17,72 @@ struct SettingsView: View {
         LabeledContent("URL", value: store.serverURLString)
       }
 
+      if store.skillsSupported {
+        Section("Management") {
+          Button {
+            store.send(.openSkillsTapped)
+          } label: {
+            Label("Skills", systemImage: "puzzlepiece.extension")
+          }
+        }
+      }
+
+      if store.configSupported {
+        Section {
+          if store.isLoadingConfig && store.configDocument == nil {
+            ProgressView("Loading config…")
+          } else {
+            ForEach(store.availableQuickEditKeys, id: \.rawValue) { key in
+              quickEditRow(key)
+            }
+          }
+          if let error = store.configError {
+            Label(error, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.orange)
+              .font(.footnote)
+          }
+        } header: {
+          Text("Quick edits")
+        } footer: {
+          Text("Curated config.yaml keys. Changes apply on the next agent session.")
+        }
+      }
+
+      if store.modelRESTSupported {
+        Section {
+          if store.isLoadingModels && store.modelOptions == nil {
+            ProgressView("Loading models…")
+          } else if let options = store.modelOptions {
+            ForEach(options.orderedProviders) { provider in
+              if provider.isConfigured {
+                ForEach(provider.models, id: \.self) { model in
+                  Button {
+                    store.send(.selectModel(model: model, provider: provider.slug ?? provider.name))
+                  } label: {
+                    HStack {
+                      Text(model)
+                      Spacer()
+                      if options.currentModel == model {
+                        Image(systemName: "checkmark")
+                          .foregroundStyle(Color.hermesAccent)
+                      }
+                    }
+                  }
+                  .disabled(store.isSettingModel || !provider.isConfigured)
+                }
+              }
+            }
+          }
+          if let error = store.modelError {
+            Label(error, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.orange)
+              .font(.footnote)
+          }
+        } header: {
+          Text("Default model")
+        }
+      }
+
       Section {
         SecureField("Session token", text: $store.token)
           .textContentType(.password)
@@ -33,6 +99,7 @@ struct SettingsView: View {
       }
 
       Section("Connection") {
+        Button("Switch server") { store.send(.switchServerTapped) }
         Button("Reconnect") { store.send(.reconnectTapped) }
         NavigationLink {
           ConnectionDebugView(entries: store.log)
@@ -188,6 +255,42 @@ struct SettingsView: View {
       )
     }
     .task { store.send(.task) }
+    .navigationDestination(
+      item: $store.scope(state: \.skills, action: \.skills)
+    ) { skillsStore in
+      SkillsView(store: skillsStore)
+    }
+  }
+
+  @ViewBuilder
+  private func quickEditRow(_ key: ConfigQuickEditKey) -> some View {
+    let current = store.configDocument.flatMap { AgentConfigDocument.value(at: key.rawValue, in: $0) }
+    if key.isBoolean {
+      Toggle(
+        key.title,
+        isOn: Binding(
+          get: { current?.boolValue ?? false },
+          set: { store.send(.setConfigBool(key, $0)) }
+        )
+      )
+      .disabled(store.configSavingKey == key.rawValue)
+    } else {
+      LabeledContent(key.title) {
+        TextField(
+          key.title,
+          text: Binding(
+            get: {
+              current?.stringValue
+                ?? current?.doubleValue.map { $0 == $0.rounded() ? String(Int($0)) : String($0) }
+                ?? ""
+            },
+            set: { store.send(.setConfigString(key, $0)) }
+          )
+        )
+        .multilineTextAlignment(.trailing)
+        .disabled(store.configSavingKey == key.rawValue)
+      }
+    }
   }
 
   /// Why the update matters, naming both versions when the agent reported one. Kept in the

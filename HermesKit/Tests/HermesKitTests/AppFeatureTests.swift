@@ -2916,6 +2916,39 @@ struct AppFeatureTests {
     #expect(push.badgeCount == 0)
   }
 
+  /// Switching dashboards clears the cold-launch tap stash without removing saved servers.
+  @Test func switchServerClearsPushTapStashAndApprovalBadges() async {
+    let push = PushClient.inMemory()
+    let preferences = PreferencesClient.inMemory()
+    preferences.saveServerURL("http://mac.tailnet:9119")
+    let saved = preferences.loadSavedServers()
+    var initial = AppFeature.State(home: SessionListFeature.State(connection: connection))
+    initial.pendingPushTap = PushTap(sessionID: "s-stale")
+    initial.pendingPushTapServerURL = URL(string: "http://mac.tailnet:9119")
+    initial.pendingApprovalSessionIDs = ["s-stale"]
+    let store = TestStore(initialState: initial) {
+      AppFeature()
+    } withDependencies: {
+      $0.push = push.client
+      $0.preferences = preferences
+    }
+    store.exhaustivity = .off
+    await push.client.setBadgeCount(1)
+    await store.send(.home(.delegate(.switchServer))) {
+      $0.home = nil
+      $0.liveChat = nil
+      $0.path = .init()
+      $0.pendingPushTap = nil
+      $0.pendingPushTapServerURL = nil
+      $0.pendingApprovalSessionIDs = []
+      $0.lastServerURLBeforeSwitch = self.connection.baseURL
+      $0.onboarding = ConnectionFeature.State(savedServers: saved)
+    }
+    await store.finish()
+    #expect(preferences.loadSavedServers().count == 1)
+    #expect(push.badgeCount == 0)
+  }
+
   /// Reauth "Quit to start" (full logout) clears the stash and the approval badge set
   /// too — the same defensive invariant as the Settings disconnect, through the other
   /// logout path.

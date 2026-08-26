@@ -135,4 +135,15 @@ import Testing
     #expect(kc.loadSession(HTTPCookieStorage()) == .cookie(cookieSession))
     #expect(kc.loadToken() == nil)
   }
+
+  @Test func perServerSessionRoundTrip() throws {
+    let kc = KeychainClient.inMemory()
+    try kc.saveSessionForServer("srv-a", .token("alpha"))
+    try kc.saveSessionForServer("srv-b", .token("beta"))
+    #expect(kc.loadSessionForServer("srv-a", HTTPCookieStorage()) == .token("alpha"))
+    #expect(kc.loadSessionForServer("srv-b", HTTPCookieStorage()) == .token("beta"))
+    try kc.deleteSessionForServer("srv-a")
+    #expect(kc.loadSessionForServer("srv-a", HTTPCookieStorage()) == nil)
+    #expect(kc.loadSessionForServer("srv-b", HTTPCookieStorage()) == .token("beta"))
+  }
 }

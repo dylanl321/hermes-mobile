@@ -10,8 +10,10 @@ struct SettingsFeatureTests {
 
   @Test func clearTokenDeletesAndEmitsDisconnect() async {
     let deleted = LockIsolated(false)
+    let deletedServerID = LockIsolated<String?>(nil)
     let preferences = PreferencesClient.inMemory()
     preferences.saveServerURL("http://mac.tailnet:9119")
+    let activeID = preferences.loadActiveServerID()!
     preferences.savePinnedIDs(["s1"])
     preferences.saveSeenCounts(["s1": 4])
     preferences.saveGroupingMode(.chronological)
@@ -22,6 +24,7 @@ struct SettingsFeatureTests {
     } withDependencies: {
       // Logout deletes the full session (token + any gated cookies), not just the token.
       $0.keychain.deleteSession = { @Sendable in deleted.setValue(true) }
+      $0.keychain.deleteSessionForServer = { @Sendable id in deletedServerID.setValue(id) }
       $0.preferences = preferences
       $0.dismiss = DismissEffect {}
     }
@@ -29,12 +32,26 @@ struct SettingsFeatureTests {
     await store.send(.clearTokenTapped)
     await store.receive(\.delegate.disconnect)
     #expect(deleted.value)
+    #expect(deletedServerID.value == activeID)
     #expect(preferences.loadServerURL() == nil) // logout forgets the server URL too
+    #expect(preferences.loadSavedServers().isEmpty) // active saved entry removed
+    #expect(preferences.loadActiveServerID() == nil)
     #expect(preferences.loadPinnedIDs() == []) // pins are per-server — cleared on logout
     #expect(preferences.loadSeenCounts() == [:]) // unread state cleared too
     #expect(preferences.loadGroupingMode() == .workspace) // grouping pref reset on logout
     #expect(preferences.loadDefaultSessionSwipeAction() == .archive) // swipe pref reset on logout
     #expect(preferences.loadSelectedProfileID() == nil) // selected profile cleared on logout
+  }
+
+  @Test func switchServerEmitsSwitchServerDelegate() async {
+    let store = TestStore(initialState: SettingsFeature.State(connection: connection)) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.dismiss = DismissEffect {}
+    }
+
+    await store.send(.switchServerTapped)
+    await store.receive(\.delegate.switchServer)
   }
 
   @Test func clearTokenWipesChatSnapshotStore() async {

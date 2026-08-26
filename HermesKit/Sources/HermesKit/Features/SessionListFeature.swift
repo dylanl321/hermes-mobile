@@ -1,6 +1,61 @@
 import ComposableArchitecture
 import Foundation
 
+/// Create/edit cron job sheet state — owned by `SessionListFeature.State.cronEditor`.
+public struct CronEditorState: Equatable, Sendable, Identifiable {
+  public enum Mode: Equatable, Sendable {
+    case create
+    case edit(id: String)
+  }
+
+  public var mode: Mode
+  public var name: String
+  public var prompt: String
+  public var schedule: String
+  public var deliver: String
+  public var isSaving: Bool
+  public var error: String?
+
+  public var id: String {
+    switch mode {
+    case .create: "create"
+    case let .edit(id): id
+    }
+  }
+
+  public var isEdit: Bool {
+    if case .edit = mode { return true }
+    return false
+  }
+
+  public var navigationTitle: String { isEdit ? "Edit cron job" : "New cron job" }
+
+  /// Save is enabled when the required REST fields are non-empty and no save is in flight.
+  public var canSave: Bool {
+    !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !schedule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !isSaving
+  }
+
+  public init(
+    mode: Mode,
+    name: String = "",
+    prompt: String = "",
+    schedule: String = "",
+    deliver: String = "",
+    isSaving: Bool = false,
+    error: String? = nil
+  ) {
+    self.mode = mode
+    self.name = name
+    self.prompt = prompt
+    self.schedule = schedule
+    self.deliver = deliver
+    self.isSaving = isSaving
+    self.error = error
+  }
+}
+
 /// A cron job with its run-history sessions — one row of the grouped Cron Jobs section.
 /// Built by `SessionListFeature.State.cronJobGroups`.
 public struct CronJobGroup: Equatable, Sendable, Identifiable {
@@ -108,6 +163,14 @@ public struct SessionListFeature {
     /// Job ids whose trigger/pause/resume RPC is IN FLIGHT. Transient double-fire guard
     /// (mirrors `archivingIDs`): added when the POST starts, removed on success/failure.
     public var cronActionInFlightIDs: Set<String>
+    /// The create/edit cron job sheet; `nil` when dismissed.
+    public var cronEditor: CronEditorState?
+    /// Gateway health from `GET /api/status` (unauthenticated probe on `connection.baseURL`).
+    public var serverStatus: ServerStatus?
+    /// Token/cost analytics from `GET /api/analytics/usage?days=30` when supported.
+    public var usageAnalytics: UsageAnalytics?
+    /// Whether the agent exposes usage analytics (set false on a definitive 404).
+    public var analyticsSupported: Bool
     /// Non-`nil` while the transient "Session ID copied" toast is showing. Purely transient
     /// confirmation state: raised by a copy, cleared by the timed expiry. It's a counter
     /// rather than a `Bool` so a re-copy while the toast is already up is still an
@@ -172,6 +235,10 @@ public struct SessionListFeature {
       cronJobsSupported: Bool = true,
       expandedCronJobID: String? = nil,
       cronActionInFlightIDs: Set<String> = [],
+      cronEditor: CronEditorState? = nil,
+      serverStatus: ServerStatus? = nil,
+      usageAnalytics: UsageAnalytics? = nil,
+      analyticsSupported: Bool = true,
       copiedIDToastToken: Int? = nil,
       settings: SettingsFeature.State? = nil,
       addProfile: AddProfileFeature.State? = nil
@@ -204,6 +271,10 @@ public struct SessionListFeature {
       self.cronJobsSupported = cronJobsSupported
       self.expandedCronJobID = expandedCronJobID
       self.cronActionInFlightIDs = cronActionInFlightIDs
+      self.cronEditor = cronEditor
+      self.serverStatus = serverStatus
+      self.usageAnalytics = usageAnalytics
+      self.analyticsSupported = analyticsSupported
       self.copiedIDToastToken = copiedIDToastToken
       self.settings = settings
       self.addProfile = addProfile
@@ -512,6 +583,24 @@ public struct SessionListFeature {
     /// pause/resume); on failure surface the banner. No optimistic mutation — job state is
     /// server-computed and the refetch/poll reconciles.
     case cronJobActionFinished(id: String, refetchSessions: Bool, error: RESTError?)
+    /// Open the create-cron sheet with empty fields.
+    case createCronTapped
+    /// Open the edit-cron sheet pre-filled from the job row.
+    case editCronTapped(id: String)
+    /// Dismiss the cron editor without saving.
+    case cronEditorDismissed
+    /// Commit create or update from the cron editor sheet.
+    case cronEditorSaveTapped
+    /// Ask to permanently delete a cron job (presents the confirmation dialog).
+    case deleteCronTapped(id: String)
+    /// A cron create/update/delete mutation finished — refetch jobs on success; surface
+    /// errors in the editor (save) or `loadError` (delete).
+    case cronMutationFinished(Result<Void, RESTError>)
+    /// Result of the unauthenticated `GET /api/status` probe (best-effort on each load).
+    case serverStatusResponse(Result<ServerStatus, RESTError>)
+    /// Result of `GET /api/analytics/usage?days=30`; a definitive 404 flips
+    /// `analyticsSupported` off silently.
+    case usageAnalyticsResponse(Result<UsageAnalytics, RESTError>)
     // MARK: Push notifications
     /// Kicks off contextual push setup once the list appears (right after login): first probe
     /// the `hermes-push` plugin readiness, then branch on the result. Fired from `.task`.
@@ -541,6 +630,7 @@ public struct SessionListFeature {
       case confirmArchive(id: Session.ID)
       case confirmDelete(id: Session.ID)
       case confirmDeleteProfile(name: String)
+      case confirmDeleteCron(id: String)
     }
 
     @CasePathable
@@ -550,6 +640,8 @@ public struct SessionListFeature {
       /// but NOT sent — used by the push "Ask agent to install" flow so the user reviews + sends.
       case createSession(initialComposerText: String?)
       case disconnect
+      /// Leave the current dashboard for onboarding to pick another saved server.
+      case switchServer
       /// The user confirmed archiving this session (the optimistic removal + PATCH follow).
       /// Emitted FIRST so the parent can tear the live-chat slot down when it matches — a
       /// detached slot's socket must not keep streaming into a now-archived session.
@@ -709,6 +801,119 @@ public struct SessionListFeature {
         ] send in
           await send(fetchCronJobs(rest: rest, connection: connection, profile: profile))
         }
+
+      case .createCronTapped:
+        state.cronEditor = CronEditorState(mode: .create)
+        return .none
+
+      case let .editCronTapped(id):
+        guard let job = state.cronJobs[id: id] else { return .none }
+        state.cronEditor = CronEditorState(
+          mode: .edit(id: id),
+          name: job.name ?? "",
+          prompt: job.prompt ?? "",
+          schedule: job.scheduleDisplay ?? ""
+        )
+        return .none
+
+      case .cronEditorDismissed:
+        state.cronEditor = nil
+        return .none
+
+      case .cronEditorSaveTapped:
+        guard var editor = state.cronEditor, editor.canSave else { return .none }
+        editor.isSaving = true
+        editor.error = nil
+        state.cronEditor = editor
+        let write = CronJobWrite(
+          prompt: editor.prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+          schedule: editor.schedule.trimmingCharacters(in: .whitespacesAndNewlines),
+          name: editor.name.trimmedNonEmpty,
+          deliver: editor.deliver.trimmedNonEmpty
+        )
+        let profile = state.profilesSupported ? state.selectedProfileName : nil
+        let mode = editor.mode
+        return .run { [rest, connection = state.connection] send in
+          do {
+            switch mode {
+            case .create:
+              _ = try await rest.createCronJob(connection, write, profile)
+            case let .edit(id):
+              _ = try await rest.updateCronJob(connection, id, write, profile)
+            }
+            await send(.cronMutationFinished(.success(())))
+          } catch {
+            await send(.cronMutationFinished(.failure(asRESTError(error))))
+          }
+        }
+
+      case let .deleteCronTapped(id):
+        guard state.cronJobs[id: id] != nil else { return .none }
+        state.confirmationDialog = ConfirmationDialogState {
+          TextState("Delete cron job?")
+        } actions: {
+          ButtonState(role: .destructive, action: .confirmDeleteCron(id: id)) {
+            TextState("Delete")
+          }
+          ButtonState(role: .cancel) {
+            TextState("Cancel")
+          }
+        } message: {
+          TextState("This permanently deletes the job and stops future runs.")
+        }
+        return .none
+
+      case let .confirmationDialog(.presented(.confirmDeleteCron(id))):
+        guard state.cronJobs[id: id] != nil else { return .none }
+        if state.expandedCronJobID == id { state.expandedCronJobID = nil }
+        let profile = state.profilesSupported ? state.selectedProfileName : nil
+        return .run { [rest, connection = state.connection] send in
+          do {
+            try await rest.deleteCronJob(connection, id, profile)
+            await send(.cronMutationFinished(.success(())))
+          } catch {
+            await send(.cronMutationFinished(.failure(asRESTError(error))))
+          }
+        }
+
+      case .cronMutationFinished(.success):
+        state.cronEditor = nil
+        return .run { [
+          rest, connection = state.connection,
+          profile = state.profilesSupported ? state.selectedProfileName : nil
+        ] send in
+          await send(fetchCronJobs(rest: rest, connection: connection, profile: profile))
+        }
+
+      case let .cronMutationFinished(.failure(error)):
+        if var editor = state.cronEditor {
+          editor.isSaving = false
+          editor.error = error.message
+          state.cronEditor = editor
+        } else {
+          state.loadError = error.message
+        }
+        return .none
+
+      case let .serverStatusResponse(.success(status)):
+        state.serverStatus = status
+        return .none
+
+      case .serverStatusResponse(.failure):
+        // Best-effort probe — keep the previous snapshot on transient failure.
+        return .none
+
+      case let .usageAnalyticsResponse(.success(analytics)):
+        state.analyticsSupported = true
+        state.usageAnalytics = analytics
+        return .none
+
+      case let .usageAnalyticsResponse(.failure(error)):
+        if error == .notFound {
+          state.analyticsSupported = false
+          state.usageAnalytics = nil
+        }
+        return .none
 
       case .setupPush:
         // Push onboarding (after login, on the list). FIRST probe whether the `hermes-push`
@@ -1160,7 +1365,8 @@ public struct SessionListFeature {
           connection: state.connection,
           pushAvailable: state.pushAvailable,
           defaultSwipeAction: state.defaultSwipeAction,
-          deleteSupported: state.deleteSupported
+          deleteSupported: state.deleteSupported,
+          profile: state.scopedProfileName
         )
         return .none
 
@@ -1410,6 +1616,10 @@ public struct SessionListFeature {
         state.settings = nil
         return .send(.delegate(.disconnect))
 
+      case .settings(.presented(.delegate(.switchServer))):
+        state.settings = nil
+        return .send(.delegate(.switchServer))
+
       case .settings(.presented(.delegate(.reconnect))):
         // Manual reconnect = re-fetch the list over REST.
         return .send(.pulledToRefresh)
@@ -1465,7 +1675,8 @@ public struct SessionListFeature {
     return .run { [
       rest, profiles, connection = state.connection, query = state.searchQuery,
       profileName = state.selectedProfileName, profilesSupported = state.profilesSupported,
-      cronJobsSupported = state.cronJobsSupported
+      cronJobsSupported = state.cronJobsSupported,
+      analyticsSupported = state.analyticsSupported
     ] send in
       await send(fetchSessions(
         rest: rest, profiles: profiles, connection: connection, query: query,
@@ -1482,6 +1693,11 @@ public struct SessionListFeature {
           rest: rest, connection: connection,
           profile: profilesSupported ? profileName : nil
         ))
+      }
+      // Gateway health + usage analytics — best-effort probes alongside each refresh.
+      await send(fetchServerStatus(rest: rest, baseURL: connection.baseURL))
+      if analyticsSupported {
+        await send(fetchUsageAnalytics(rest: rest, connection: connection, days: 30))
       }
     }
     // Shared `fetch` id: a newer load/search/poll cancels this one, so an older in-flight
@@ -1603,6 +1819,33 @@ private func fetchCronJobs(
     return .cronJobsResponse(.failure(error))
   } catch {
     return .cronJobsResponse(.failure(.unreachable))
+  }
+}
+
+private func fetchServerStatus(
+  rest: HermesRESTClient,
+  baseURL: URL
+) async -> SessionListFeature.Action {
+  do {
+    return .serverStatusResponse(.success(try await rest.status(baseURL)))
+  } catch let error as RESTError {
+    return .serverStatusResponse(.failure(error))
+  } catch {
+    return .serverStatusResponse(.failure(.unreachable))
+  }
+}
+
+private func fetchUsageAnalytics(
+  rest: HermesRESTClient,
+  connection: ServerConnection,
+  days: Int
+) async -> SessionListFeature.Action {
+  do {
+    return .usageAnalyticsResponse(.success(try await rest.usageAnalytics(connection, days)))
+  } catch let error as RESTError {
+    return .usageAnalyticsResponse(.failure(error))
+  } catch {
+    return .usageAnalyticsResponse(.failure(.unreachable))
   }
 }
 

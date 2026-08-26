@@ -23,6 +23,27 @@ struct ConnectionView: View {
         }
       }
 
+      if !store.savedServers.isEmpty {
+        Section {
+          ForEach(store.savedServers) { server in
+            Button {
+              store.send(.savedServerSelected(server))
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(server.displayLabel)
+                if server.label.trimmingCharacters(in: .whitespacesAndNewlines) != server.baseURL {
+                  Text(server.baseURL)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+              }
+            }
+          }
+        } header: {
+          Text("Saved servers")
+        }
+      }
+
       Section {
         TextField("http://host:9119", text: $store.serverURL)
           .keyboardType(.URL)
