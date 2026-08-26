@@ -44,10 +44,10 @@ jobs:
 
       - name: Install Tuist
         run: |
+          # Prefer Homebrew — install.tuist.io is Cloudflare-gated and returns an HTML
+          # challenge to CI runners (curl | bash then fails with a syntax error).
           if ! command -v tuist >/dev/null 2>&1; then
-            curl -Ls https://install.tuist.io | bash
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            echo "/usr/local/bin" >> "$GITHUB_PATH"
+            brew install --formula tuist
           fi
           tuist version
 
