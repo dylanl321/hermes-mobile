@@ -1,0 +1,106 @@
+# Builds an unsigned device IPA for Hermes Mobile, publishes it to a
+# rolling GitHub Release, and writes an AltStore / Feather source JSON.
+# No Apple Developer account or signing secrets.
+#
+# Add this source URL in AltStore, SideStore, or Feather:
+# https://github.com/<owner>/<repo>/releases/download/hermes-mobile-sideload/source.json
+#
+# The IPA will not install on a stock iPhone until AltStore / Feather
+# re-signs it. This job only produces the archive and the source.
+
+name: Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'altstore/**'
+      - 'README.md'
+      - 'docs/**'
+      - 'wiki/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-unsigned-ipa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcode-select -p
+
+      - name: Install Tuist
+        run: |
+          if ! command -v tuist >/dev/null 2>&1; then
+            curl -Ls https://install.tuist.io | bash
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            echo "/usr/local/bin" >> "$GITHUB_PATH"
+          fi
+          tuist version
+
+      - name: Generate Xcode project
+        run: |
+          tuist install
+          tuist generate --no-open
+
+      - name: Package unsigned IPA
+        env:
+          NSUnbufferedIO: YES
+          IOS_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/package-ios-ipa.sh
+
+      - name: Write AltStore / Feather source
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/write-sideload-source.py \
+            --meta build/ipa-meta.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag hermes-mobile-sideload \
+            --ref "${{ github.event.repository.default_branch }}" \
+            --output altstore/source.json \
+            --notes "Unsigned Hermes Mobile ${{ github.sha }} (run ${{ github.run_number }})."
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HermesMobile-unsigned-ipa
+          path: |
+            build/*.ipa
+            altstore/source.json
+            build/ipa-meta.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sideload release
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: hermes-mobile-sideload
+          name: Hermes Mobile unsigned (AltStore / Feather)
+          prerelease: true
+          make_latest: false
+          body: |
+            Rolling unsigned Hermes Mobile IPA for AltStore, SideStore, and Feather.
+
+            **Source URL** (paste this in AltStore or Feather):
+            https://github.com/${{ github.repository }}/releases/download/hermes-mobile-sideload/source.json
+
+            AltStore and Feather re-sign this IPA with your own certificate. It will not install on a stock iPhone by itself.
+          files: |
+            build/HermesMobile.ipa
+            build/HermesMobile-*-unsigned.ipa
+            altstore/source.json
