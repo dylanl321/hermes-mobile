@@ -43,11 +43,21 @@ jobs:
           xcode-select -p
 
       - name: Install Tuist
+        env:
+          # Pin a stable CLI release (assets on GitHub Releases). Avoid install.tuist.io
+          # (Cloudflare-gated) and core Homebrew (no tuist formula).
+          TUIST_VERSION: "4.205.0"
         run: |
-          # Prefer Homebrew — install.tuist.io is Cloudflare-gated and returns an HTML
-          # challenge to CI runners (curl | bash then fails with a syntax error).
           if ! command -v tuist >/dev/null 2>&1; then
-            brew install --formula tuist
+            curl -fsSL -o /tmp/tuist.zip \
+              "https://github.com/tuist/tuist/releases/download/${TUIST_VERSION}/tuist.zip"
+            INSTALL_DIR="${HOME}/.local/share/tuist-${TUIST_VERSION}"
+            rm -rf "$INSTALL_DIR"
+            mkdir -p "$INSTALL_DIR"
+            unzip -q -o /tmp/tuist.zip -d "$INSTALL_DIR"
+            chmod +x "$INSTALL_DIR/tuist"
+            echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+            export PATH="$INSTALL_DIR:$PATH"
           fi
           tuist version
 
