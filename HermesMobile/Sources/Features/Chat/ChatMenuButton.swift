@@ -2,8 +2,8 @@ import ComposableArchitecture
 import HermesKit
 import SwiftUI
 
-/// The chat screen's nav-bar ellipsis menu (Rename / Copy ID), split out of `ChatView` so
-/// it observes ONLY the two fields it renders (#82).
+/// The chat screen's nav-bar ellipsis menu (Rename / Copy ID / Open workspace), split out
+/// of `ChatView` so it observes ONLY the fields it renders (#82).
 ///
 /// `ChatView.body` re-evaluates on every streaming change — each `message.delta`, tool
 /// start/complete, status update, and thinking tick — because it reads `visibleRows`,
@@ -14,7 +14,7 @@ import SwiftUI
 ///
 /// As a child view holding the store — a reference, which SwiftUI diffs by identity, so the
 /// parent's re-render alone does not re-run this body — Observation re-evaluates it only
-/// when `canRename` / `sessionKey` change, i.e. at session creation and never mid-turn.
+/// when `canRename` / `sessionKey` / `canOpenWorkspace` change, not on every stream delta.
 ///
 /// Deliberately takes the STORE rather than `canRename:` / `onRename:` parameters: closure
 /// fields are not comparable, so SwiftUI would have to re-run the body on every parent
@@ -32,6 +32,11 @@ struct ChatMenuButton: View {
       // exists at all (a brand-new chat that hasn't been created yet).
       Button("Copy ID", systemImage: "doc.on.doc") { store.send(.copySessionIDTapped) }
         .disabled(store.sessionKey == nil)
+      if store.canOpenWorkspace {
+        Button("Open workspace", systemImage: "folder") {
+          store.send(.openWorkspaceTapped)
+        }
+      }
     } label: {
       Image(systemName: "ellipsis.circle")
     }

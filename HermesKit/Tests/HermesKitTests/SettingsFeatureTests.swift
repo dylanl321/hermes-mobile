@@ -543,4 +543,23 @@ struct SettingsFeatureTests {
       $0.env = nil
     }
   }
+
+  @Test func openSkillsEmitsOpenSkillsDelegate() async {
+    let store = TestStore(initialState: SettingsFeature.State(connection: connection)) {
+      SettingsFeature()
+    }
+
+    await store.send(.openSkillsTapped)
+    await store.receive(\.delegate.openSkills)
+  }
+
+  @Test func openSkillsNoOpsWhenUnsupported() async {
+    var initial = SettingsFeature.State(connection: connection)
+    initial.skillsSupported = false
+    let store = TestStore(initialState: initial) {
+      SettingsFeature()
+    }
+
+    await store.send(.openSkillsTapped)
+  }
 }

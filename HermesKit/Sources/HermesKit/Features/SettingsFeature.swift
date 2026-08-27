@@ -51,9 +51,6 @@ public struct SettingsFeature {
     public var envSupported: Bool
     /// Optimistic: hide Workspaces after `/api/fs` 404/405.
     public var fsSupported: Bool
-    /// Pushed via `navigationDestination` from Settings — `@Presents` so the view can
-    /// bind `$store.scope` (expects `PresentationAction`).
-    @Presents public var skills: SkillsFeature.State?
     /// Pushed via `navigationDestination` — API Keys / `.env` editor.
     @Presents public var env: EnvFeature.State?
     /// Optimistic: hide Quick edits after config 404.
@@ -103,7 +100,6 @@ public struct SettingsFeature {
       skillsSupported: Bool = true,
       envSupported: Bool = true,
       fsSupported: Bool = true,
-      skills: SkillsFeature.State? = nil,
       env: EnvFeature.State? = nil,
       configSupported: Bool = true,
       configDocument: JSONValue? = nil,
@@ -132,7 +128,6 @@ public struct SettingsFeature {
       self.skillsSupported = skillsSupported
       self.envSupported = envSupported
       self.fsSupported = fsSupported
-      self.skills = skills
       self.env = env
       self.configSupported = configSupported
       self.configDocument = configDocument
@@ -211,7 +206,6 @@ public struct SettingsFeature {
     case openSkillsTapped
     case openEnvTapped
     case openWorkspacesTapped
-    case skills(PresentationAction<SkillsFeature.Action>)
     case env(PresentationAction<EnvFeature.Action>)
     case configResponse(Result<JSONValue, RESTError>)
     case setConfigBool(ConfigQuickEditKey, Bool)
@@ -245,6 +239,9 @@ public struct SettingsFeature {
       /// The default swipe action changed — the session list mirrors it immediately so the
       /// rows are right the moment the sheet dismisses.
       case defaultSwipeActionChanged(SessionSwipeAction)
+      /// Open the Skills sheet — parent dismisses Settings and presents Skills on the
+      /// list host (same pattern as Workspaces).
+      case openSkills
       /// Open the agent workspace browser — parent dismisses Settings and presents the
       /// Workspaces sheet (keeps FS effects on the list host).
       case openWorkspaces
@@ -464,12 +461,7 @@ public struct SettingsFeature {
 
       case .openSkillsTapped:
         guard state.skillsSupported else { return .none }
-        state.skills = SkillsFeature.State(
-          connection: state.connection,
-          profile: state.profile,
-          skillsSupported: state.skillsSupported
-        )
-        return .none
+        return .send(.delegate(.openSkills))
 
       case .openEnvTapped:
         guard state.envSupported else { return .none }
@@ -483,14 +475,6 @@ public struct SettingsFeature {
       case .openWorkspacesTapped:
         guard state.fsSupported else { return .none }
         return .send(.delegate(.openWorkspaces))
-
-      case .skills(.presented(.delegate(.skillsUnsupported))):
-        state.skillsSupported = false
-        state.skills = nil
-        return .none
-
-      case .skills:
-        return .none
 
       case .env(.presented(.delegate(.envUnsupported))):
         state.envSupported = false
@@ -593,9 +577,6 @@ public struct SettingsFeature {
       case .delegate:
         return .none
       }
-    }
-    .ifLet(\.$skills, action: \.skills) {
-      SkillsFeature()
     }
     .ifLet(\.$env, action: \.env) {
       EnvFeature()

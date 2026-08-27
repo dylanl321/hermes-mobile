@@ -45,8 +45,8 @@ AppFeature                 // root nav + launch auto-connect; onboarding until c
 ├─ SessionListFeature      // flat list, grouped by workspace OR chronological (persisted) /
 │  │                       //   search / create; pin (client-side) + archive/rename/delete (server) +
 │  │                       //   working-glow auto-poll; profile pill/switcher (per-call scoped) +
-│  │                       //   presents Settings + Archived + Workspaces + AddProfile sheets
-│  ├─ SettingsFeature      // token mgmt, manual reconnect, debug log; Skills + Workspaces entry
+│  │                       //   presents Settings + Archived + Workspaces + Skills + AddProfile sheets
+│  ├─ SettingsFeature      // token mgmt, manual reconnect, debug log; Skills/Workspaces/API Keys entry
 │  ├─ ArchivedSessionsFeature // archived list (?archived=only); restore + open delegate +
 │  │                       //   immediate delete — the `deleted` delegate carries the rollback
 │  │                       //   payload and the PARENT list runs the DELETE round-trip (a

@@ -9,7 +9,7 @@ management routes documented at
 [Web Dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard).
 Older agents that 404 a route hide that feature; the rest of the app keeps working.
 
-## Skills (Settings → Skills)
+## Skills (More / Settings → Skills)
 
 | API | Behavior |
 |-----|----------|
@@ -19,6 +19,9 @@ Older agents that 404 a route hide that feature; the rest of the app keeps worki
 | `POST /api/skills/hub/install\|uninstall\|update` | Backgrounded; poll `/api/actions/{name}/status` |
 
 Capability: first list 404 → hide Skills entry. Profile: omit `?profile=` for default.
+Entry points: session-list **More** → Skills, Settings → Skills (dismisses Settings and
+presents the same list-hosted sheet). Enabled skills also appear as `/` slash routes in
+chat (invocation only — not the management hub).
 
 ## API Keys (Settings → API Keys)
 
@@ -40,7 +43,7 @@ remains available (some agents only allow reveal from the web SPA). Never log re
 values or full `/api/env` bodies. Writes apply to new sessions; a running CLI may need
 `/reload`.
 
-## Workspaces (Organize / Settings → Workspaces)
+## Workspaces (More / Settings → Workspaces)
 
 Read-mostly browser for project folders on the agent host, using the desktop remote
 filesystem rail (`/api/fs/*`). Roots are **client-derived** from distinct session
@@ -53,9 +56,11 @@ filesystem rail (`/api/fs/*`). Roots are **client-derived** from distinct sessio
 | `GET /api/fs/read-text?path=` | Text preview (size-capped) |
 | `GET /api/fs/read-data-url?path=` | Image / binary payload |
 
-Capability: first definitive 404/405 → hide Workspaces (Organize, Settings, session
-“Open workspace”). Profile: omit `?profile=` for default. Entry points: Organize →
-**Workspaces**, Settings → **Workspaces**, session/group context **Open workspace**.
+Capability: first definitive 404/405 → hide Workspaces (More, Settings, session/group
+context **Open workspace**, chat `⋯` **Open workspace**). Profile: omit `?profile=` for
+default. Entry points: More → **Workspaces**, Settings → **Workspaces**, session/group
+context **Open workspace**, chat menu **Open workspace** when the live session has a
+`cwd`.
 
 Privacy: never log file bodies or data URLs; path strings only in UI state. Mutations
 (upload / mkdir / delete) and the managed `/api/files` CRUD rail are out of scope here.

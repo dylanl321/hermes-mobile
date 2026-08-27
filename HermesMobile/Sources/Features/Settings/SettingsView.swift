@@ -45,11 +45,6 @@ struct SettingsView: View {
     }
     .task { store.send(.task) }
     .navigationDestination(
-      item: $store.scope(state: \.skills, action: \.skills)
-    ) { skillsStore in
-      SkillsView(store: skillsStore)
-    }
-    .navigationDestination(
       item: $store.scope(state: \.env, action: \.env)
     ) { envStore in
       EnvView(store: envStore)
