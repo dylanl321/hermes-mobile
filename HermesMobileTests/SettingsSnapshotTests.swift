@@ -7,8 +7,34 @@ import XCTest
 @testable import HermesMobile
 
 final class SettingsSnapshotTests: SnapshotTestCase {
+  /// Pin `envSupported = false` so existing Settings baselines stay stable; API Keys
+  /// chrome is covered by `EnvSnapshotTests`.
+  private func settingsState(
+    connection: ServerConnection? = nil,
+    pushAvailable: Bool = true,
+    notificationsEnabled: Bool = false,
+    notificationsDenied: Bool = false,
+    testPushStatus: SettingsFeature.State.TestPushStatus = .idle,
+    pushPlugin: PushPluginInfo? = nil,
+    pluginUpdate: SettingsFeature.State.PluginUpdateStatus = .idle,
+    deleteSupported: Bool = true
+  ) -> SettingsFeature.State {
+    var state = SettingsFeature.State(
+      connection: connection ?? self.connection,
+      pushAvailable: pushAvailable,
+      notificationsEnabled: notificationsEnabled,
+      notificationsDenied: notificationsDenied,
+      testPushStatus: testPushStatus,
+      pushPlugin: pushPlugin,
+      pluginUpdate: pluginUpdate,
+      deleteSupported: deleteSupported,
+      envSupported: false
+    )
+    return state
+  }
+
   func testSettingsView() {
-    var initial = SettingsFeature.State(connection: connection)
+    var initial = settingsState()
     initial.log = [
       GatewayLogEntry(id: 0, type: "gateway.ready", summary: ""),
       GatewayLogEntry(id: 1, type: "message.delta", summary: "Here's the gist"),
@@ -27,8 +53,7 @@ final class SettingsSnapshotTests: SnapshotTestCase {
   /// section must be hidden entirely (Archive is the only destructive action, so the
   /// choice would be meaningless). The default-state snapshot above shows it.
   func testSettingsView_deleteUnsupported() {
-    var initial = SettingsFeature.State(connection: connection)
-    initial.deleteSupported = false
+    var initial = settingsState(deleteSupported: false)
     initial.log = [
       GatewayLogEntry(id: 0, type: "gateway.ready", summary: ""),
       GatewayLogEntry(id: 1, type: "message.delta", summary: "Here's the gist"),
@@ -49,12 +74,11 @@ final class SettingsSnapshotTests: SnapshotTestCase {
   /// section: it sits above Notifications, and with it present the rows these snapshots
   /// exist to prove — the test-sent label especially — fall below the device fold.
   func testSettingsNotificationsEnabled() {
-    var initial = SettingsFeature.State(
-      connection: connection,
+    let initial = settingsState(
       pushAvailable: true,
-      notificationsEnabled: true
+      notificationsEnabled: true,
+      deleteSupported: false
     )
-    initial.deleteSupported = false
     let view = NavigationStack {
       SettingsView(
         store: Store(initialState: initial) { SettingsFeature().ignoring(\.task) } withDependencies: {
@@ -68,11 +92,10 @@ final class SettingsSnapshotTests: SnapshotTestCase {
 
   /// Push not available on this server (plugin missing) → "not available" note, no controls.
   func testSettingsNotificationsUnavailable() {
-    var initial = SettingsFeature.State(
-      connection: connection,
-      pushAvailable: false
+    let initial = settingsState(
+      pushAvailable: false,
+      deleteSupported: false
     )
-    initial.deleteSupported = false
     let view = NavigationStack {
       SettingsView(
         store: Store(initialState: initial) { SettingsFeature().ignoring(\.task) } withDependencies: {
@@ -86,13 +109,12 @@ final class SettingsSnapshotTests: SnapshotTestCase {
 
   /// Test notification just sent → confirmation label.
   func testSettingsNotificationsTestSent() {
-    var initial = SettingsFeature.State(
-      connection: connection,
+    let initial = settingsState(
       pushAvailable: true,
       notificationsEnabled: true,
-      testPushStatus: .sent
+      testPushStatus: .sent,
+      deleteSupported: false
     )
-    initial.deleteSupported = false
     let view = NavigationStack {
       SettingsView(
         store: Store(initialState: initial) { SettingsFeature().ignoring(\.task) } withDependencies: {
@@ -106,8 +128,7 @@ final class SettingsSnapshotTests: SnapshotTestCase {
 
   /// An outdated, git-updatable plugin → the update row with the one-tap button.
   func testSettingsPluginUpdateAvailable() {
-    let initial = SettingsFeature.State(
-      connection: connection,
+    let initial = settingsState(
       pushAvailable: true,
       notificationsEnabled: true,
       pushPlugin: PushPluginInfo(status: .ready, version: "0.1.0", canUpdateGit: true)
@@ -125,8 +146,7 @@ final class SettingsSnapshotTests: SnapshotTestCase {
 
   /// After a successful pull — the RESTART notice, which is the whole point of that state.
   func testSettingsPluginUpdatedNeedsRestart() {
-    let initial = SettingsFeature.State(
-      connection: connection,
+    let initial = settingsState(
       pushAvailable: true,
       notificationsEnabled: true,
       pushPlugin: PushPluginInfo(status: .ready, version: "0.1.0", canUpdateGit: true),
@@ -145,8 +165,7 @@ final class SettingsSnapshotTests: SnapshotTestCase {
 
   /// Outdated but not a git checkout → no button, pointer to the guide instead.
   func testSettingsPluginUpdateNeedsManualSteps() {
-    let initial = SettingsFeature.State(
-      connection: connection,
+    let initial = settingsState(
       pushAvailable: true,
       notificationsEnabled: true,
       pushPlugin: PushPluginInfo(status: .ready, version: "0.1.0", canUpdateGit: false)

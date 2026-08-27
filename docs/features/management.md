@@ -20,6 +20,26 @@ Older agents that 404 a route hide that feature; the rest of the app keeps worki
 
 Capability: first list 404 → hide Skills entry. Profile: omit `?profile=` for default.
 
+## API Keys (Settings → API Keys)
+
+Manage the agent host’s `~/.hermes/.env` (API keys and related credentials) via the
+dashboard Keys surface. Values in the list are **redacted**; the app never stores agent
+secrets in Keychain (Keychain stays `AuthSession` only).
+
+| API | Behavior |
+|-----|----------|
+| `GET /api/env` | Catalog: set/unset, redacted preview, description, category, advanced |
+| `PUT /api/env` | Set / overwrite `{"key","value"}` (empty submit is a client no-op) |
+| `DELETE /api/env` | Remove `{"key"}` |
+| `POST /api/env/reveal` | Unredact one key (optional; soft-gated) |
+
+Capability: first list 404/405 → hide API Keys. Profile: omit `?profile=` for default.
+Advanced keys stay hidden until the in-list toggle. Reveal uses the same `AuthSession` as
+other REST; on 401/403/404/405 the Reveal button is hidden for that agent and overwrite
+remains available (some agents only allow reveal from the web SPA). Never log reveal
+values or full `/api/env` bodies. Writes apply to new sessions; a running CLI may need
+`/reload`.
+
 ## Workspaces (Organize / Settings → Workspaces)
 
 Read-mostly browser for project folders on the agent host, using the desktop remote

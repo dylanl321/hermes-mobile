@@ -87,9 +87,23 @@ Switch → teardown live chat slot (logout policy) + clear foreign push tap stat
 Enrich `ServerStatus` with memory/disk pressure; `GET /api/analytics/usage`;
 compact strip on session list. Gate analytics on 404.
 
-### Phase 6+ (deferred)
+### Phase 6 — API Keys / Env
 
-Env/reveal, MCP, webhooks, kanban, memory provider/reset, curator/logs, messaging/pairing.
+| API | Client | Feature | UI |
+|-----|--------|---------|-----|
+| `GET /api/env` | `env` | `EnvFeature` (Settings child) | Catalog by category; Advanced toggle |
+| `PUT /api/env` | `putEnv` | same | SecureField overwrite sheet |
+| `DELETE /api/env` | `deleteEnv` | same | Confirmation + `.bottomActionSheet` |
+| `POST /api/env/reveal` | `revealEnv` | same | Optional; soft-gate on 401/403/404/405 |
+
+Gate: 404/405 → `envSupported = false`. Reveal soft-gate → `revealSupported = false`
+(list + overwrite still work). Profile: omit `"default"`. Never log reveal values /
+full `/api/env` bodies.
+
+### Phase 6+ (still deferred)
+
+MCP, webhooks, kanban, memory provider/reset, curator/logs, messaging/pairing,
+credential pool.
 
 ## Capability-gate strategy
 
@@ -115,6 +129,7 @@ Auth 401 keeps existing reconnect / `ReauthFeature` paths.
 | 3 | PUT round-trip; unknown keys ignored; 404 gate |
 | 4 | Store round-trip; switch clears chat + push tap |
 | 5 | Pressure decode; analytics 404; ops strip snapshot |
+| 6 | Env catalog decode; put/delete/reveal client; 404 gate; reveal soft-gate; Env list snapshot |
 
 Every phase: `make test`.
 
@@ -128,5 +143,5 @@ Every phase: `make test`.
 ## Manual checklist (DoD)
 
 Sideload install → login → skills toggle → hub install → cron create → config quick
-edit → model set → multi-server switch → status/analytics visible. Older Hermes
-without routes: features hidden, chat still works.
+edit → model set → API Keys list/set/delete → multi-server switch → status/analytics
+visible. Older Hermes without routes: features hidden, chat still works.

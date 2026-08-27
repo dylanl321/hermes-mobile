@@ -49,6 +49,11 @@ struct SettingsView: View {
     ) { skillsStore in
       SkillsView(store: skillsStore)
     }
+    .navigationDestination(
+      item: $store.scope(state: \.env, action: \.env)
+    ) { envStore in
+      EnvView(store: envStore)
+    }
   }
 
   // MARK: - Sections (split so the type checker stays under budget)
@@ -61,13 +66,20 @@ struct SettingsView: View {
 
   @ViewBuilder
   private var managementSection: some View {
-    if store.skillsSupported || store.fsSupported {
+    if store.skillsSupported || store.envSupported || store.fsSupported {
       Section("Management") {
         if store.skillsSupported {
           Button {
             store.send(.openSkillsTapped)
           } label: {
             Label("Skills", systemImage: "puzzlepiece.extension")
+          }
+        }
+        if store.envSupported {
+          Button {
+            store.send(.openEnvTapped)
+          } label: {
+            Label("API Keys", systemImage: "key.fill")
           }
         }
         if store.fsSupported {

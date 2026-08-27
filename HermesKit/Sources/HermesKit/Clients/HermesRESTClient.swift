@@ -310,6 +310,24 @@ public struct HermesRESTClient: Sendable {
     throw RESTError.notFound
   }
 
+  /// Env / API Keys catalog — `GET /api/env`. Values are redacted; pass `profile` to scope.
+  public var env: @Sendable (_ connection: ServerConnection, _ profile: String?) async throws -> [EnvVarEntry] = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Set an env var — `PUT /api/env` `{"key","value","profile"?}`.
+  public var putEnv: @Sendable (_ connection: ServerConnection, _ key: String, _ value: String, _ profile: String?) async throws -> Void = { _, _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Remove an env var — `DELETE /api/env` `{"key","profile"?}`.
+  public var deleteEnv: @Sendable (_ connection: ServerConnection, _ key: String, _ profile: String?) async throws -> Void = { _, _, _ in
+    throw RESTError.notFound
+  }
+  /// Unredact one key — `POST /api/env/reveal` `{"key","profile"?}`. May 401/403 on agents
+  /// that only allow the SPA ephemeral token; callers soft-gate `revealSupported`.
+  public var revealEnv: @Sendable (_ connection: ServerConnection, _ key: String, _ profile: String?) async throws -> String = { _, _, _ in
+    throw RESTError.notFound
+  }
+
   // MARK: Remote filesystem (desktop `/api/fs` rail)
 
   /// List a directory on the agent host — `GET /api/fs/list?path=`. Soft ENOENT/EACCES
@@ -609,6 +627,39 @@ public extension HermesRESTClient {
           .init(name: "days", value: String(days)),
         ])
         return try await get(url, token: conn.token, session: session)
+      },
+      env: { conn, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/env", query: query)
+        let response: EnvCatalogResponse = try await get(url, token: conn.token, session: session)
+        return response.entries
+      },
+      putEnv: { conn, key, value, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/env", query: query)
+        var payload: [String: Any] = ["key": key, "value": value]
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        try await send(url, method: "PUT", body: body, token: conn.token, session: session)
+      },
+      deleteEnv: { conn, key, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/env", query: query)
+        var payload: [String: Any] = ["key": key]
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        try await send(url, method: "DELETE", body: body, token: conn.token, session: session)
+      },
+      revealEnv: { conn, key, profile in
+        let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []
+        let url = try makeURL(conn.baseURL, "/api/env/reveal", query: query)
+        var payload: [String: Any] = ["key": key]
+        if let profile { payload["profile"] = profile }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let response: EnvRevealResponse = try await postJSON(
+          url, body: body, token: conn.token, session: session
+        )
+        return response.value
       },
       fsList: { conn, path, profile in
         var items = [URLQueryItem(name: "path", value: path)]

@@ -514,4 +514,33 @@ struct SettingsFeatureTests {
     await store.receive(\.delegate.defaultSwipeActionChanged)
     #expect(preferences.loadDefaultSessionSwipeAction() == .archive)
   }
+
+  // MARK: API Keys (EnvFeature child)
+
+  @Test func openEnvPresentsChild() async {
+    let store = TestStore(initialState: SettingsFeature.State(connection: connection)) {
+      SettingsFeature()
+    }
+
+    await store.send(.openEnvTapped) {
+      $0.env = EnvFeature.State(
+        connection: connection,
+        profile: nil,
+        envSupported: true
+      )
+    }
+  }
+
+  @Test func envUnsupportedHidesEntry() async {
+    var initial = SettingsFeature.State(connection: connection)
+    initial.env = EnvFeature.State(connection: connection)
+    let store = TestStore(initialState: initial) {
+      SettingsFeature()
+    }
+
+    await store.send(.env(.presented(.delegate(.envUnsupported)))) {
+      $0.envSupported = false
+      $0.env = nil
+    }
+  }
 }
