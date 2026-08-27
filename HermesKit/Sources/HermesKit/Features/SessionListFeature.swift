@@ -201,6 +201,11 @@ public struct SessionListFeature {
     @Presents public var workspaceBrowser: WorkspaceBrowserFeature.State?
     /// Whether the agent exposes `/api/fs/*` (optimistic true; flipped off on 404/405).
     public var fsSupported: Bool
+    /// Skills management sheet (`/api/skills`). Hosted here (like Workspaces) so Settings
+    /// can dismiss-and-present without nesting a second sheet stack.
+    @Presents public var skills: SkillsFeature.State?
+    /// Whether the agent exposes `/api/skills` (optimistic true; flipped off on 404).
+    public var skillsSupported: Bool
     @Presents public var addProfile: AddProfileFeature.State?
     @Presents public var confirmationDialog: ConfirmationDialogState<Action.Dialog>?
 
@@ -254,7 +259,8 @@ public struct SessionListFeature {
       copiedIDToastToken: Int? = nil,
       settings: SettingsFeature.State? = nil,
       addProfile: AddProfileFeature.State? = nil,
-      fsSupported: Bool = true
+      fsSupported: Bool = true,
+      skillsSupported: Bool = true
     ) {
       self.connection = connection
       self.sessions = sessions
@@ -292,6 +298,7 @@ public struct SessionListFeature {
       self.settings = settings
       self.addProfile = addProfile
       self.fsSupported = fsSupported
+      self.skillsSupported = skillsSupported
     }
 
     /// Whether the currently-selected profile is the default (no `?profile=` scoping for
@@ -545,7 +552,10 @@ public struct SessionListFeature {
     /// Open the Archived sessions sheet (from the top-trailing menu).
     case archivedButtonTapped
     case archived(PresentationAction<ArchivedSessionsFeature.Action>)
-    /// Open the Workspaces browser sheet (Organize menu / Settings → Workspaces).
+    /// Open the Skills sheet (More menu / Settings → Skills).
+    case skillsButtonTapped
+    case skills(PresentationAction<SkillsFeature.Action>)
+    /// Open the Workspaces browser sheet (More menu / Settings → Workspaces).
     case workspacesButtonTapped
     /// Jump straight into a session’s `cwd` in the Workspaces browser.
     case openWorkspace(path: String)
@@ -1403,6 +1413,7 @@ public struct SessionListFeature {
           defaultSwipeAction: state.defaultSwipeAction,
           deleteSupported: state.deleteSupported,
           profile: state.scopedProfileName,
+          skillsSupported: state.skillsSupported,
           fsSupported: state.fsSupported
         )
         return .none
@@ -1420,6 +1431,32 @@ public struct SessionListFeature {
           // hides the sheet's Delete affordances from the start.
           deleteSupported: state.deleteSupported
         )
+        return .none
+
+      case .skillsButtonTapped:
+        guard state.skillsSupported else { return .none }
+        state.settings = nil
+        state.skills = SkillsFeature.State(
+          connection: state.connection,
+          profile: state.scopedProfileName,
+          skillsSupported: state.skillsSupported
+        )
+        return .none
+
+      case .skills(.presented(.delegate(.dismiss))):
+        state.skills = nil
+        return .none
+
+      case .skills(.presented(.delegate(.skillsUnsupported))):
+        state.skillsSupported = false
+        state.skills = nil
+        if var settings = state.settings {
+          settings.skillsSupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .skills:
         return .none
 
       case .workspacesButtonTapped:
@@ -1461,6 +1498,16 @@ public struct SessionListFeature {
         return .none
 
       case .workspaceBrowser:
+        return .none
+
+      case .settings(.presented(.delegate(.openSkills))):
+        guard state.skillsSupported else { return .none }
+        state.settings = nil
+        state.skills = SkillsFeature.State(
+          connection: state.connection,
+          profile: state.scopedProfileName,
+          skillsSupported: state.skillsSupported
+        )
         return .none
 
       case .settings(.presented(.delegate(.openWorkspaces))):
@@ -1740,6 +1787,9 @@ public struct SessionListFeature {
     }
     .ifLet(\.$workspaceBrowser, action: \.workspaceBrowser) {
       WorkspaceBrowserFeature()
+    }
+    .ifLet(\.$skills, action: \.skills) {
+      SkillsFeature()
     }
     .ifLet(\.$addProfile, action: \.addProfile) {
       AddProfileFeature()

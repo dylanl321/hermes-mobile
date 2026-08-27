@@ -3222,4 +3222,84 @@ struct SessionListFeatureTests {
 
     await store.send(.onDisappear)
   }
+
+  // MARK: - Skills / Workspaces discoverability
+
+  @Test func skillsButtonPresentsTheSheet() async {
+    let store = TestStore(initialState: SessionListFeature.State(connection: connection)) {
+      SessionListFeature()
+    }
+
+    await store.send(.skillsButtonTapped) {
+      $0.skills = SkillsFeature.State(
+        connection: self.connection,
+        profile: nil,
+        skillsSupported: true
+      )
+    }
+  }
+
+  @Test func skillsButtonNoOpsWhenUnsupported() async {
+    var initial = SessionListFeature.State(connection: connection)
+    initial.skillsSupported = false
+    let store = TestStore(initialState: initial) { SessionListFeature() }
+
+    await store.send(.skillsButtonTapped)
+  }
+
+  @Test func settingsOpenSkillsDismissesAndPresentsSheet() async {
+    var initial = SessionListFeature.State(connection: connection)
+    initial.settings = SettingsFeature.State(connection: connection)
+    let store = TestStore(initialState: initial) { SessionListFeature() }
+
+    await store.send(.settings(.presented(.delegate(.openSkills)))) {
+      $0.settings = nil
+      $0.skills = SkillsFeature.State(
+        connection: self.connection,
+        profile: nil,
+        skillsSupported: true
+      )
+    }
+  }
+
+  @Test func skillsUnsupportedMirrorsOntoTheList() async {
+    var initial = SessionListFeature.State(connection: connection)
+    initial.skills = SkillsFeature.State(connection: connection)
+    let store = TestStore(initialState: initial) { SessionListFeature() }
+
+    await store.send(.skills(.presented(.delegate(.skillsUnsupported)))) {
+      $0.skillsSupported = false
+      $0.skills = nil
+    }
+  }
+
+  @Test func workspacesButtonPresentsTheSheet() async {
+    let store = TestStore(initialState: SessionListFeature.State(connection: connection)) {
+      SessionListFeature()
+    }
+
+    await store.send(.workspacesButtonTapped) {
+      $0.workspaceBrowser = WorkspaceBrowserFeature.State(
+        connection: self.connection,
+        profile: nil,
+        fsSupported: true,
+        seedSessions: []
+      )
+    }
+  }
+
+  @Test func settingsPresentationThreadsSkillsAndFSSupport() async {
+    var initial = SessionListFeature.State(connection: connection)
+    initial.skillsSupported = false
+    initial.fsSupported = false
+    let store = TestStore(initialState: initial) { SessionListFeature() }
+
+    await store.send(.settingsButtonTapped) {
+      $0.settings = SettingsFeature.State(
+        connection: self.connection,
+        skillsSupported: false,
+        fsSupported: false
+      )
+    }
+  }
 }

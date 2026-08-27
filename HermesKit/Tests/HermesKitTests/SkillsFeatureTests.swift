@@ -127,4 +127,15 @@ struct SkillModelTests {
     #expect(keys.contains(.modelDefault))
     #expect(keys.contains(.displayShowCost))
   }
+
+  @Test func doneTappedEmitsDismiss() async {
+    let store = TestStore(
+      initialState: SkillsFeature.State(connection: connection)
+    ) {
+      SkillsFeature()
+    }
+
+    await store.send(.doneTapped)
+    await store.receive(\.delegate.dismiss)
+  }
 }

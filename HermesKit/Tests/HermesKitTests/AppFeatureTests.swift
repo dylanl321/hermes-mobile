@@ -166,6 +166,51 @@ struct AppFeatureTests {
     }
   }
 
+  @Test func openingSessionSeedsCwdAndFSSupport() async {
+    var home = SessionListFeature.State(connection: connection)
+    home.fsSupported = false
+    let store = TestStore(initialState: AppFeature.State(home: home)) {
+      AppFeature()
+    }
+    let session = Session(id: "20260610_cwd", title: "Proj", cwd: "/Users/me/proj")
+
+    await store.send(.home(.delegate(.openSession(session)))) {
+      $0.liveChat = ChatFeature.State(
+        connection: self.connection,
+        resumeStoredID: "20260610_cwd",
+        profileName: nil,
+        title: "Proj",
+        cwd: "/Users/me/proj",
+        fsSupported: false
+      )
+      $0.path.append(ChatScreen.State(sessionKey: "20260610_cwd"))
+    }
+  }
+
+  @Test func chatOpenWorkspaceRoutesToHome() async {
+    let home = SessionListFeature.State(connection: connection)
+    let chat = ChatFeature.State(
+      connection: connection,
+      resumeStoredID: "s1",
+      cwd: "/Users/me/proj",
+      fsSupported: true
+    )
+    var initial = AppFeature.State(home: home, liveChat: chat)
+    initial.path.append(ChatScreen.State(sessionKey: "s1"))
+    let store = TestStore(initialState: initial) { AppFeature() }
+
+    await store.send(.liveChat(.delegate(.openWorkspace(path: "/Users/me/proj"))))
+    await store.receive(\.home.openWorkspace) {
+      $0.home!.workspaceBrowser = WorkspaceBrowserFeature.State(
+        connection: self.connection,
+        profile: nil,
+        fsSupported: true,
+        initialPath: "/Users/me/proj",
+        seedSessions: []
+      )
+    }
+  }
+
   @Test func creatingSessionFillsSlotWithNewChat() async {
     let store = TestStore(
       initialState: AppFeature.State(home: SessionListFeature.State(connection: connection))

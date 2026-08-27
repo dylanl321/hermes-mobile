@@ -46,6 +46,8 @@ struct SkillsView: View {
         }
       } header: {
         Text("Installed")
+      } footer: {
+        Text("Enabled skills appear as /commands in chat.")
       }
 
       Section {
@@ -103,6 +105,9 @@ struct SkillsView: View {
     .navigationTitle("Skills")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
+      ToolbarItem(placement: .confirmationAction) {
+        Button("Done") { store.send(.doneTapped) }
+      }
       ToolbarItem(placement: .primaryAction) {
         Button("Refresh") { store.send(.refreshTapped) }
           .disabled(store.isLoading)

@@ -114,6 +114,11 @@ struct SessionListView: View {
         WorkspaceBrowserView(store: browserStore)
       }
     }
+    .sheet(item: $store.scope(state: \.skills, action: \.skills)) { skillsStore in
+      NavigationStack {
+        SkillsView(store: skillsStore)
+      }
+    }
     .sheet(item: $store.scope(state: \.addProfile, action: \.addProfile)) { addProfileStore in
       NavigationStack {
         AddProfileView(store: addProfileStore)
@@ -497,8 +502,8 @@ struct SessionListView: View {
     .padding(.vertical, 8)
   }
 
-  /// Top-trailing menu: choose the grouping mode (checkmark on the active one), then a
-  /// divider and the Archived sessions entry. Mirrors the Codex "Organize / Manage" menu.
+  /// Top-trailing menu: grouping, then Skills / Workspaces / Archived. Labelled “More”
+  /// (not a filter icon) so management tools aren’t buried under a sort metaphor.
   private var organizeMenu: some View {
     Menu {
       Picker(
@@ -515,6 +520,14 @@ struct SessionListView: View {
 
       Divider()
 
+      if store.skillsSupported {
+        Button {
+          store.send(.skillsButtonTapped)
+        } label: {
+          Label("Skills", systemImage: "puzzlepiece.extension")
+        }
+      }
+
       if store.fsSupported {
         Button {
           store.send(.workspacesButtonTapped)
@@ -529,7 +542,7 @@ struct SessionListView: View {
         Label("Archived sessions", systemImage: "archivebox")
       }
     } label: {
-      Label("Organize", systemImage: "line.3.horizontal.decrease.circle")
+      Label("More", systemImage: "ellipsis.circle")
     }
   }
 

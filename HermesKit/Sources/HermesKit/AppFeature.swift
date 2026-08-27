@@ -480,7 +480,9 @@ public struct AppFeature {
           connection: home.connection,
           resumeStoredID: session.id,
           profileName: home.scopedProfileName,
-          title: session.resolvedTitle
+          title: session.resolvedTitle,
+          cwd: session.cwd,
+          fsSupported: home.fsSupported
         )
         chat.expectsPendingApproval = expectsApproval
         guard state.liveChat != nil else {
@@ -499,7 +501,8 @@ public struct AppFeature {
         let chat = ChatFeature.State(
           connection: home.connection,
           profileName: home.scopedProfileName,
-          composerText: initialComposerText ?? ""
+          composerText: initialComposerText ?? "",
+          fsSupported: home.fsSupported
         )
         guard state.liveChat != nil else {
           fillLiveChat(chat, into: &state)
@@ -692,7 +695,8 @@ public struct AppFeature {
         var chat = ChatFeature.State(
           connection: home.connection,
           resumeStoredID: creation.handle.storedSessionID,
-          profileName: home.scopedProfileName
+          profileName: home.scopedProfileName,
+          fsSupported: home.fsSupported
         )
         chat.attachLiveSessionID = creation.handle.sessionID
         chat.branchSeed = creation.seed
@@ -702,6 +706,11 @@ public struct AppFeature {
           return reload
         }
         return .concatenate(teardownSlot(thenFill: chat), reload)
+
+      case let .liveChat(.delegate(.openWorkspace(path))):
+        // Chat menu → Workspaces sheet hosted on the session list (same as row context menu).
+        guard state.home != nil else { return .none }
+        return .send(.home(.openWorkspace(path: path)))
 
       case let .liveChat(.delegate(.runningChanged(sessionID, running))):
         // Route the live chat's authoritative working-state change to the session list so its

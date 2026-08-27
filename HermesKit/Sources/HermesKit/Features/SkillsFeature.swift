@@ -2,7 +2,8 @@ import ComposableArchitecture
 import Foundation
 
 /// Skills management (dashboard REST): installed list + enable toggles + hub search/install.
-/// Presented from Settings when the agent exposes `/api/skills`.
+/// Presented as a sheet from the session list (More menu / Settings → Skills) when the
+/// agent exposes `/api/skills`.
 @Reducer
 public struct SkillsFeature {
   @ObservableState
@@ -68,11 +69,14 @@ public struct SkillsFeature {
     case hubActionFailed(String)
     case dismissError
     case dismissHubMessage
+    case doneTapped
     case delegate(Delegate)
 
     @CasePathable
     public enum Delegate {
       case skillsUnsupported
+      /// Sheet Done — parent dismisses the presented Skills sheet.
+      case dismiss
     }
   }
 
@@ -225,6 +229,9 @@ public struct SkillsFeature {
       case .dismissHubMessage:
         state.hubActionMessage = nil
         return .none
+
+      case .doneTapped:
+        return .send(.delegate(.dismiss))
 
       case .delegate:
         return .none

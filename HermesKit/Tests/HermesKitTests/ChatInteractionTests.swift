@@ -575,4 +575,32 @@ struct ChatInteractionTests {
     await clock.advance(by: .seconds(1.5))
     await store.receive(\.copiedIDToastExpired) { $0.copiedIDToastToken = nil }
   }
+
+  @Test func openWorkspaceEmitsDelegateWhenCwdAndFSSupported() async {
+    var initial = readyState()
+    initial.cwd = "/Users/me/proj"
+    initial.fsSupported = true
+    let store = TestStore(initialState: initial) { ChatFeature() }
+
+    await store.send(.openWorkspaceTapped)
+    await store.receive(\.delegate.openWorkspace)
+  }
+
+  @Test func openWorkspaceNoOpsWithoutCwd() async {
+    var initial = readyState()
+    initial.cwd = nil
+    initial.fsSupported = true
+    let store = TestStore(initialState: initial) { ChatFeature() }
+
+    await store.send(.openWorkspaceTapped)
+  }
+
+  @Test func openWorkspaceNoOpsWhenFSUnsupported() async {
+    var initial = readyState()
+    initial.cwd = "/Users/me/proj"
+    initial.fsSupported = false
+    let store = TestStore(initialState: initial) { ChatFeature() }
+
+    await store.send(.openWorkspaceTapped)
+  }
 }

@@ -101,6 +101,12 @@ public struct ChatFeature {
     /// Latest context-window usage (from `session.info` / `message.complete`), driving the
     /// composer's context pill. `nil` until the agent reports usage (old agents never do).
     public var usage: Usage?
+    /// Working directory for this session (`session.info` / list `cwd`). Used for the chat
+    /// menu’s “Open workspace” affordance when `fsSupported`.
+    public var cwd: String?
+    /// Whether the connected agent exposes `/api/fs/*` (seeded from the session list;
+    /// optimistic true). Gates “Open workspace” in the chat menu.
+    public var fsSupported: Bool
     /// The model/reasoning picker sheet, when open (Task 7).
     public var modelPicker: ModelPicker?
     /// Draft text for the rename alert. `nil` = alert closed; non-nil = alert open
@@ -406,7 +412,9 @@ public struct ChatFeature {
       title: String? = nil,
       transcript: IdentifiedArrayOf<ChatRow> = [],
       composerText: String = "",
-      status: Status = .connecting
+      status: Status = .connecting,
+      cwd: String? = nil,
+      fsSupported: Bool = true
     ) {
       self.connection = connection
       self.profileName = profileName
@@ -437,6 +445,8 @@ public struct ChatFeature {
       self.model = nil
       self.reasoningEffort = nil
       self.usage = nil
+      self.cwd = cwd
+      self.fsSupported = fsSupported
       self.modelPicker = nil
       self.renameDraft = nil
       self.recentlyCopiedToken = nil
@@ -542,6 +552,13 @@ public struct ChatFeature {
     /// Rename is only meaningful once we have a live session id (otherwise `confirmRename`
     /// silently no-ops) — drives whether the toolbar Rename control is enabled.
     public var canRename: Bool { liveSessionID != nil }
+
+    /// Chat menu “Open workspace” — needs FS support and a non-empty session cwd.
+    public var canOpenWorkspace: Bool {
+      guard fsSupported else { return false }
+      let path = cwd?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return !path.isEmpty
+    }
 
     /// Rows for the slash-command autocomplete panel (#36), derived PURELY from
     /// `composerText` + the cached catalog on every keystroke — no stored suggestion
@@ -690,6 +707,8 @@ public struct ChatFeature {
     /// Put this chat's session id (`sessionKey`) on the pasteboard and raise the transient
     /// confirmation toast. A no-op before the session resolves (`sessionKey == nil`).
     case copySessionIDTapped
+    /// Open the session’s cwd in the Workspaces browser (parent hosts the sheet).
+    case openWorkspaceTapped
     /// The copy toast's dwell time elapsed — hide it.
     case copiedIDToastExpired
     // Voice input (#7)
@@ -807,6 +826,9 @@ public struct ChatFeature {
       /// chat's `branchSeed`, so a server-side reap of the never-prompted branch can be
       /// healed by replaying the seeded create.
       case branchCreated(BranchCreation)
+      /// Open the agent Workspaces browser at this session’s cwd — parent routes to the
+      /// session list’s `openWorkspace` (sheet host).
+      case openWorkspace(path: String)
 
       /// The `branchCreated` payload: the create response's handle plus the client-held
       /// seed that can rebuild the branch wholesale after an orphan reap.
@@ -1511,6 +1533,13 @@ public struct ChatFeature {
           }
           .cancellable(id: CancelID.copyIDToast, cancelInFlight: true)
         )
+
+      case .openWorkspaceTapped:
+        guard state.canOpenWorkspace,
+          let path = state.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !path.isEmpty
+        else { return .none }
+        return .send(.delegate(.openWorkspace(path: path)))
 
       case .copiedIDToastExpired:
         state.copiedIDToastToken = nil
@@ -2221,6 +2250,7 @@ public struct ChatFeature {
       if let model = info.model?.nonEmpty { state.model = model }
       if let effort = info.reasoningEffort?.nonEmpty { state.reasoningEffort = effort }
       if let u = info.usage { state.usage = u }
+      if let cwd = info.cwd?.nonEmpty { state.cwd = cwd }
       return .none
 
     case let .reviewSummary(text):
@@ -2590,6 +2620,7 @@ public struct ChatFeature {
       state.model = target.model
       state.reasoningEffort = target.reasoningEffort
       state.usage = target.usage
+      if let cwd = info.cwd?.nonEmpty { state.cwd = cwd }
     }
 
     // Working indicator from the authoritative `running` flag — except while a slash exec
