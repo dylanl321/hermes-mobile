@@ -71,7 +71,7 @@ public struct EnvFeature {
       return titles.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    public func entries(in categoryTitle: String) -> [EnvVarEntry] {
+    public func entriesInCategory(_ categoryTitle: String) -> [EnvVarEntry] {
       visibleEntries.filter { $0.categoryTitle == categoryTitle }
     }
   }
