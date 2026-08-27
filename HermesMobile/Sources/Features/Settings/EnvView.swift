@@ -67,7 +67,7 @@ struct EnvView: View {
       ForEach(store.categoryTitles, id: \.self) { category in
         EnvCategorySection(
           category: category,
-          entries: store.entries(in: category),
+          entries: store.entriesInCategory(category),
           onRowTapped: { store.send(.rowTapped($0)) }
         )
       }
