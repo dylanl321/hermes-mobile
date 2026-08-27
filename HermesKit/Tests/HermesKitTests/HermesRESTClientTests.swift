@@ -955,6 +955,73 @@ struct HermesRESTClientTests {
     #expect(MockURLProtocol.lastRequest?.url?.path == "/api/analytics/usage")
   }
 
+  @Test func envCatalogDecodesAndThreadsProfile() async throws {
+    MockURLProtocol.set(json: #"""
+    {
+      "OPENROUTER_API_KEY": {
+        "is_set": true,
+        "redacted_value": "sk-…abcd",
+        "description": "OpenRouter",
+        "category": "LLM Providers",
+        "is_password": true
+      }
+    }
+    """#)
+    let entries = try await makeClient().env(connection, "work")
+    #expect(entries.map(\.key) == ["OPENROUTER_API_KEY"])
+    #expect(entries.first?.isSet == true)
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.url?.path == "/api/env")
+    #expect(req.url?.query == "profile=work")
+  }
+
+  @Test func envMissingEndpointThrowsNotFound() async throws {
+    MockURLProtocol.set(status: 404)
+    await #expect(throws: RESTError.notFound) {
+      _ = try await makeClient().env(connection, nil)
+    }
+  }
+
+  @Test func putEnvSendsKeyValueBody() async throws {
+    MockURLProtocol.set(json: "{}")
+    try await makeClient().putEnv(connection, "OPENROUTER_API_KEY", "secret", nil)
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "PUT")
+    #expect(req.url?.path == "/api/env")
+    let body = try JSONSerialization.jsonObject(with: bodyData(req)) as? [String: Any]
+    #expect(body?["key"] as? String == "OPENROUTER_API_KEY")
+    #expect(body?["value"] as? String == "secret")
+    #expect(body?["profile"] == nil)
+  }
+
+  @Test func deleteEnvSendsKeyBodyWithProfile() async throws {
+    MockURLProtocol.set(json: "{}")
+    try await makeClient().deleteEnv(connection, "OPENROUTER_API_KEY", "work")
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "DELETE")
+    #expect(req.url?.path == "/api/env")
+    #expect(req.url?.query == "profile=work")
+    let body = try JSONSerialization.jsonObject(with: bodyData(req)) as? [String: Any]
+    #expect(body?["key"] as? String == "OPENROUTER_API_KEY")
+    #expect(body?["profile"] as? String == "work")
+  }
+
+  @Test func revealEnvPostsAndReturnsValue() async throws {
+    MockURLProtocol.set(json: #"{"key":"OPENROUTER_API_KEY","value":"plaintext"}"#)
+    let value = try await makeClient().revealEnv(connection, "OPENROUTER_API_KEY", nil)
+    #expect(value == "plaintext")
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "POST")
+    #expect(req.url?.path == "/api/env/reveal")
+  }
+
+  @Test func revealEnvUnauthorizedThrows() async throws {
+    MockURLProtocol.set(status: 401)
+    await #expect(throws: RESTError.unauthorized) {
+      _ = try await makeClient().revealEnv(connection, "OPENROUTER_API_KEY", nil)
+    }
+  }
+
   @Test func statusDecodesMemoryPressure() async throws {
     MockURLProtocol.set(json: #"{"version":"0.2","gateway_running":true,"memory":{"pressure":"elevated","system_available_mb":100}}"#)
     let status = try await makeClient().status(baseURL)

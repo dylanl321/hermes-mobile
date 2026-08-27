@@ -47,11 +47,15 @@ public struct SettingsFeature {
     public var profile: String?
     /// Optimistic: hide Skills after a definitive missing-endpoint verdict.
     public var skillsSupported: Bool
+    /// Optimistic: hide API Keys after `/api/env` 404/405.
+    public var envSupported: Bool
     /// Optimistic: hide Workspaces after `/api/fs` 404/405.
     public var fsSupported: Bool
     /// Pushed via `navigationDestination` from Settings — `@Presents` so the view can
     /// bind `$store.scope` (expects `PresentationAction`).
     @Presents public var skills: SkillsFeature.State?
+    /// Pushed via `navigationDestination` — API Keys / `.env` editor.
+    @Presents public var env: EnvFeature.State?
     /// Optimistic: hide Quick edits after config 404.
     public var configSupported: Bool
     public var configDocument: JSONValue?
@@ -97,8 +101,10 @@ public struct SettingsFeature {
       deleteSupported: Bool = true,
       profile: String? = nil,
       skillsSupported: Bool = true,
+      envSupported: Bool = true,
       fsSupported: Bool = true,
       skills: SkillsFeature.State? = nil,
+      env: EnvFeature.State? = nil,
       configSupported: Bool = true,
       configDocument: JSONValue? = nil,
       isLoadingConfig: Bool = false,
@@ -124,8 +130,10 @@ public struct SettingsFeature {
       self.deleteSupported = deleteSupported
       self.profile = profile
       self.skillsSupported = skillsSupported
+      self.envSupported = envSupported
       self.fsSupported = fsSupported
       self.skills = skills
+      self.env = env
       self.configSupported = configSupported
       self.configDocument = configDocument
       self.isLoadingConfig = isLoadingConfig
@@ -201,8 +209,10 @@ public struct SettingsFeature {
     /// User picked a different default swipe action for session rows.
     case defaultSwipeActionChanged(SessionSwipeAction)
     case openSkillsTapped
+    case openEnvTapped
     case openWorkspacesTapped
     case skills(PresentationAction<SkillsFeature.Action>)
+    case env(PresentationAction<EnvFeature.Action>)
     case configResponse(Result<JSONValue, RESTError>)
     case setConfigBool(ConfigQuickEditKey, Bool)
     case setConfigString(ConfigQuickEditKey, String)
@@ -461,6 +471,15 @@ public struct SettingsFeature {
         )
         return .none
 
+      case .openEnvTapped:
+        guard state.envSupported else { return .none }
+        state.env = EnvFeature.State(
+          connection: state.connection,
+          profile: state.profile,
+          envSupported: state.envSupported
+        )
+        return .none
+
       case .openWorkspacesTapped:
         guard state.fsSupported else { return .none }
         return .send(.delegate(.openWorkspaces))
@@ -471,6 +490,14 @@ public struct SettingsFeature {
         return .none
 
       case .skills:
+        return .none
+
+      case .env(.presented(.delegate(.envUnsupported))):
+        state.envSupported = false
+        state.env = nil
+        return .none
+
+      case .env:
         return .none
 
       case let .configResponse(.success(config)):
@@ -569,6 +596,9 @@ public struct SettingsFeature {
     }
     .ifLet(\.$skills, action: \.skills) {
       SkillsFeature()
+    }
+    .ifLet(\.$env, action: \.env) {
+      EnvFeature()
     }
   }
 
