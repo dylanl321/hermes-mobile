@@ -132,9 +132,9 @@ extension RESTError {
   public var isRevealDeniedVerdict: Bool {
     switch self {
     case .unauthorized, .notFound: true
-    case .server(status: 401, _), true
-    case .server(status: 403, _), true
-    case .server(status: 404, _), true
+    case .server(status: 401, _): true
+    case .server(status: 403, _): true
+    case .server(status: 404, _): true
     case .server(status: 405, detail: _): true
     default: false
     }
