@@ -138,12 +138,14 @@ struct EnvFeatureTests {
   }
 
   @Test func revealSuccessStoresValueUntilDismiss() async {
+    let clock = TestClock()
     var state = EnvFeature.State(connection: connection, entries: IdentifiedArray(uniqueElements: sampleEntries))
     state.edit = EnvFeature.EditState(entry: sampleEntries[0])
     let store = TestStore(initialState: state) {
       EnvFeature()
     } withDependencies: {
       $0.hermesREST.revealEnv = { @Sendable _, _, _ in "plaintext-secret" }
+      $0.continuousClock = clock
     }
 
     await store.send(.revealTapped) { $0.isRevealing = true }
@@ -157,6 +159,46 @@ struct EnvFeatureTests {
       $0.isSaving = false
     }
     #expect(store.state.edit == nil)
+  }
+
+  @Test func revealAutoClearsAfterDwell() async {
+    let clock = TestClock()
+    var state = EnvFeature.State(connection: connection, entries: IdentifiedArray(uniqueElements: sampleEntries))
+    state.edit = EnvFeature.EditState(entry: sampleEntries[0])
+    let store = TestStore(initialState: state) {
+      EnvFeature()
+    } withDependencies: {
+      $0.hermesREST.revealEnv = { @Sendable _, _, _ in "plaintext-secret" }
+      $0.continuousClock = clock
+    }
+
+    await store.send(.revealTapped) { $0.isRevealing = true }
+    await store.receive(\.revealFinished.success) {
+      $0.isRevealing = false
+      $0.edit?.revealedValue = "plaintext-secret"
+    }
+    await clock.advance(by: EnvFeature.revealDwellDuration)
+    await store.receive(\.clearRevealedValue) {
+      $0.edit?.revealedValue = nil
+    }
+  }
+
+  @Test func revealRateLimitedSurfacesBanner() async {
+    var state = EnvFeature.State(connection: connection, entries: IdentifiedArray(uniqueElements: sampleEntries))
+    state.edit = EnvFeature.EditState(entry: sampleEntries[0])
+    let store = TestStore(initialState: state) {
+      EnvFeature()
+    } withDependencies: {
+      $0.hermesREST.revealEnv = { @Sendable _, _, _ in
+        throw RESTError.server(status: 429, detail: "Too many")
+      }
+    }
+
+    await store.send(.revealTapped) { $0.isRevealing = true }
+    await store.receive(\.revealFinished.failure) {
+      $0.isRevealing = false
+      $0.errorBanner = "Too many reveal requests. Try again shortly."
+    }
   }
 
   @Test func deleteConfirmsThenReloads() async {
@@ -214,6 +256,22 @@ struct EnvFeatureTests {
     var shown = state
     shown.showAdvanced = true
     #expect(shown.visibleEntries.map(\.key) == ["OPENROUTER_API_KEY", "RARE_FLAG"])
+  }
+
+  @Test func visibleEntriesSetOnlyAndSearch() {
+    let entries = sampleEntries + [
+      EnvVarEntry(key: "TAVILY_API_KEY", isSet: false, category: "Tool API Keys"),
+    ]
+    var state = EnvFeature.State(
+      connection: connection,
+      entries: IdentifiedArray(uniqueElements: entries),
+      showAdvanced: true,
+      showSetOnly: true
+    )
+    #expect(state.visibleEntries.map(\.key) == ["OPENROUTER_API_KEY"])
+    state.showSetOnly = false
+    state.searchQuery = "tavily"
+    #expect(state.visibleEntries.map(\.key) == ["TAVILY_API_KEY"])
   }
 }
 

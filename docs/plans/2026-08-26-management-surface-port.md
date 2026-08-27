@@ -91,10 +91,10 @@ compact strip on session list. Gate analytics on 404.
 
 | API | Client | Feature | UI |
 |-----|--------|---------|-----|
-| `GET /api/env` | `env` | `EnvFeature` (Settings child) | Catalog by category; Advanced toggle |
+| `GET /api/env` | `env` | `EnvFeature` (Settings child) | Catalog by category; search / Set only / Advanced |
 | `PUT /api/env` | `putEnv` | same | SecureField overwrite sheet |
 | `DELETE /api/env` | `deleteEnv` | same | Confirmation + `.bottomActionSheet` |
-| `POST /api/env/reveal` | `revealEnv` | same | Optional; soft-gate on 401/403/404/405 |
+| `POST /api/env/reveal` | `revealEnv` | same | Optional; soft-gate on 401/403/404/405; 30s auto-clear |
 
 Gate: 404/405 → `envSupported = false`. Reveal soft-gate → `revealSupported = false`
 (list + overwrite still work). Profile: omit `"default"`. Never log reveal values /
