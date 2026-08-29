@@ -17,6 +17,10 @@ public struct EnvFeature {
     public var isLoading: Bool
     public var errorBanner: String?
     public var showAdvanced: Bool
+    /// When true, hide unset catalog rows (local filter).
+    public var showSetOnly: Bool
+    /// Local case-insensitive substring filter on key name.
+    public var searchQuery: String
     public var edit: EditState?
     public var isSaving: Bool
     public var isDeleting: Bool
@@ -32,6 +36,8 @@ public struct EnvFeature {
       isLoading: Bool = false,
       errorBanner: String? = nil,
       showAdvanced: Bool = false,
+      showSetOnly: Bool = false,
+      searchQuery: String = "",
       edit: EditState? = nil,
       isSaving: Bool = false,
       isDeleting: Bool = false,
@@ -46,6 +52,8 @@ public struct EnvFeature {
       self.isLoading = isLoading
       self.errorBanner = errorBanner
       self.showAdvanced = showAdvanced
+      self.showSetOnly = showSetOnly
+      self.searchQuery = searchQuery
       self.edit = edit
       self.isSaving = isSaving
       self.isDeleting = isDeleting
@@ -53,9 +61,19 @@ public struct EnvFeature {
       self.confirmationDialog = confirmationDialog
     }
 
-    /// Entries visible given the Advanced toggle.
+    /// Entries visible given Advanced / Set-only / search filters.
     public var visibleEntries: [EnvVarEntry] {
-      entries.filter { showAdvanced || !$0.advanced }
+      let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+      return entries.filter { entry in
+        if !showAdvanced && entry.advanced { return false }
+        if showSetOnly && !entry.isSet { return false }
+        if !query.isEmpty,
+          entry.key.range(of: query, options: .caseInsensitive) == nil
+        {
+          return false
+        }
+        return true
+      }
     }
 
     /// Category titles in stable alphabetical order for sectioning the list.
@@ -111,6 +129,7 @@ public struct EnvFeature {
     case deleteFinished(Result<Void, RESTError>)
     case dismissEdit
     case dismissError
+    case clearRevealedValue
     case delegate(Delegate)
 
     public enum Dialog: Equatable {
@@ -123,9 +142,13 @@ public struct EnvFeature {
     }
   }
 
-  private enum CancelID { case load, save, delete, reveal }
+  private enum CancelID { case load, save, delete, reveal, revealDwell }
+
+  /// How long a revealed plaintext value stays in edit state before auto-clear.
+  static let revealDwellDuration: Duration = .seconds(30)
 
   @Dependency(\.hermesREST) var rest
+  @Dependency(\.continuousClock) var clock
 
   public init() {}
 
@@ -170,7 +193,7 @@ public struct EnvFeature {
         guard let entry = state.entries[id: key] else { return .none }
         state.edit = EditState(entry: entry)
         state.errorBanner = nil
-        return .none
+        return .cancel(id: CancelID.revealDwell)
 
       case let .draftValueChanged(text):
         state.edit?.draftValue = text
@@ -203,7 +226,10 @@ public struct EnvFeature {
         // Clear plaintext from the sheet before dismissing.
         state.edit = nil
         state.isLoading = true
-        return loadEnv(state)
+        return .merge(
+          .cancel(id: CancelID.revealDwell),
+          loadEnv(state)
+        )
 
       case let .saveFinished(.failure(error)):
         state.isSaving = false
@@ -233,7 +259,11 @@ public struct EnvFeature {
       case let .revealFinished(.success(value)):
         state.isRevealing = false
         state.edit?.revealedValue = value
-        return .none
+        return .run { [clock] send in
+          try await clock.sleep(for: Self.revealDwellDuration)
+          await send(.clearRevealedValue)
+        }
+        .cancellable(id: CancelID.revealDwell, cancelInFlight: true)
 
       case let .revealFinished(.failure(error)):
         state.isRevealing = false
@@ -241,7 +271,20 @@ public struct EnvFeature {
           state.revealSupported = false
           return .none
         }
+        // Authenticated REST maps 429 → `.server(status: 429)` (login-only uses `.rateLimited`).
+        if case .server(status: 429, _) = error {
+          state.errorBanner = "Too many reveal requests. Try again shortly."
+          return .none
+        }
+        if case .rateLimited = error {
+          state.errorBanner = "Too many reveal requests. Try again shortly."
+          return .none
+        }
         state.errorBanner = error.message
+        return .none
+
+      case .clearRevealedValue:
+        state.edit?.revealedValue = nil
         return .none
 
       case .deleteTapped:
@@ -283,7 +326,10 @@ public struct EnvFeature {
         state.isDeleting = false
         state.edit = nil
         state.isLoading = true
-        return loadEnv(state)
+        return .merge(
+          .cancel(id: CancelID.revealDwell),
+          loadEnv(state)
+        )
 
       case let .deleteFinished(.failure(error)):
         state.isDeleting = false
@@ -297,7 +343,8 @@ public struct EnvFeature {
         state.isSaving = false
         return .merge(
           .cancel(id: CancelID.reveal),
-          .cancel(id: CancelID.save)
+          .cancel(id: CancelID.save),
+          .cancel(id: CancelID.revealDwell)
         )
 
       case .dismissError:

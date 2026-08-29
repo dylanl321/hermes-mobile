@@ -8,7 +8,7 @@ struct EnvView: View {
   var body: some View {
     List {
       errorBannerSection
-      advancedToggleSection
+      filterSection
       catalogSection
     }
     .navigationTitle("API Keys")
@@ -46,8 +46,12 @@ struct EnvView: View {
     }
   }
 
-  private var advancedToggleSection: some View {
+  private var filterSection: some View {
     Section {
+      TextField("Search keys", text: $store.searchQuery)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+      Toggle("Set only", isOn: $store.showSetOnly)
       Toggle("Show advanced keys", isOn: $store.showAdvanced)
     }
   }
@@ -75,7 +79,17 @@ struct EnvView: View {
   }
 
   private var emptyCatalogMessage: String {
-    store.showAdvanced
+    let query = store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !query.isEmpty {
+      return "No keys match “\(query)”."
+    }
+    if store.showSetOnly && !store.showAdvanced {
+      return "No set keys to show. Turn off Set only or enable advanced."
+    }
+    if store.showSetOnly {
+      return "No set keys in the catalog."
+    }
+    return store.showAdvanced
       ? "No environment variables in the catalog."
       : "No keys to show. Turn on advanced to see rarely-used variables."
   }
@@ -210,10 +224,19 @@ private struct EnvEditSheet: View {
   @ViewBuilder
   private var revealSection: some View {
     if let revealed = store.edit?.revealedValue ?? edit.revealedValue {
-      Section("Revealed value") {
-        Text(revealed)
-          .font(.body.monospaced())
-          .textSelection(.enabled)
+      Section {
+        // SecureField (not selectable Text) — v1 deliberately has no copy affordance so
+        // revealed secrets do not land on the pasteboard.
+        SecureField("Revealed value", text: .constant(revealed))
+          .disabled(true)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+        Button("Hide") { store.send(.clearRevealedValue) }
+          .font(.footnote)
+      } header: {
+        Text("Revealed value")
+      } footer: {
+        Text("Hidden automatically after a short delay, or when you close this sheet.")
       }
     } else if store.revealSupported, edit.entry.isSet {
       Section {
