@@ -250,6 +250,7 @@ struct ChatInteractionTests {
 
     await store.send(.modelSelected("claude-sonnet-4-6")) {
       $0.model = "claude-sonnet-4-6" // optimistic
+      $0.pendingConfigRollback.updateValue(nil, forKey: "model") // nothing confirmed yet
     }
     await store.finish()
 
@@ -270,11 +271,56 @@ struct ChatInteractionTests {
 
     await store.send(.reasoningSelected("high")) {
       $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue(nil, forKey: "reasoning")
     }
     await store.finish()
 
     #expect(sent.value?["key"]?.stringValue == "reasoning")
     #expect(sent.value?["value"]?.stringValue == "high")
+  }
+
+  /// The full-ladder acceptance path (#81): `max` goes out on the wire, the chip takes it
+  /// optimistically, and the authoritative `session.info` the server emits after a successful
+  /// `config.set` echoes it — so the selection survives the hydrate rather than snapping back.
+  @Test func selectingMaxSendsItAndSurvivesTheEchoingSessionInfo() async {
+    let sent = LockIsolated<JSONValue?>(nil)
+    var initial = readyState()
+    initial.reasoningEffort = "medium"
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.chatSnapshot = .inMemory()
+      $0.hermesGateway.send = { @Sendable _, params in
+        sent.setValue(params)
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max" // optimistic
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.finish() // no `.configSetFailed`: nothing to roll back
+
+    #expect(sent.value?["key"]?.stringValue == "reasoning")
+    #expect(sent.value?["value"]?.stringValue == "max")
+    #expect(ModelOptions.offeredEfforts(extendedSupported: store.state.extendedReasoningSupported)
+      .contains("max"))
+
+    // Server-authoritative echo — the chip stays on `max`.
+    store.exhaustivity = .off(showSkippedAssertions: false) // the snapshot-persist debounce
+    await store.send(.gatewayEvent(.sessionInfo(SessionInfo(reasoningEffort: "max"))))
+    await store.finish()
+    #expect(store.state.reasoningEffort == "max")
+  }
+
+  /// The latch is per chat slot and unpersisted, so a fresh chat re-offers `max`/`ultra` —
+  /// that is the whole recovery story for an agent upgrade (no probe, no reset action).
+  @Test func freshSlotReOffersTheExtendedLevels() {
+    let fresh = ChatFeature.State(connection: conn)
+    #expect(fresh.extendedReasoningSupported)
+    #expect(ModelOptions.offeredEfforts(extendedSupported: fresh.extendedReasoningSupported)
+      == ModelOptions.reasoningEfforts)
   }
 
   @Test func selectionIsBlockedWhileSending() async {
@@ -284,6 +330,254 @@ struct ChatInteractionTests {
     // Mid-turn switches are rejected by the server (4009) — guarded client-side.
     await store.send(.modelSelected("claude-sonnet-4-6"))
     await store.send(.reasoningSelected("high"))
+  }
+
+  // MARK: config.set failures — rollback, latch, banner (#81)
+
+  /// A chat whose model + effort are already known, so a rollback has something to restore.
+  private func configuredState() -> ChatFeature.State {
+    var state = readyState()
+    state.model = "gpt-5"
+    state.reasoningEffort = "medium"
+    return state
+  }
+
+  /// A gateway stub whose `config.set` always throws `error` (everything else succeeds).
+  private func failingConfigSet(_ error: any Error) -> @Sendable (String, JSONValue) async throws -> JSONValue {
+    { @Sendable method, _ in
+      if method == "config.set" { throw error }
+      return .object([:])
+    }
+  }
+
+  /// The 4002 verdict is the ONE capability statement: roll back, banner naming the level, and
+  /// latch `max`/`ultra` off for the rest of the slot.
+  @Test func rejectedExtendedReasoningRollsBackAndLatches() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("unknown reasoning value: max"))
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max" // optimistic
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium" // rolled back
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.extendedReasoningSupported = false
+      $0.errorBanner = "This agent doesn’t support \"max\" reasoning."
+    }
+    await store.finish()
+  }
+
+  /// A transport failure is NOT a capability verdict (#62 logic) — roll back and banner, but the
+  /// levels stay on offer.
+  @Test func timedOutReasoningSelectionRollsBackWithoutLatching() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.timedOut(method: "config.set"))
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.timedOut(method: "config.set").message)"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  /// Any other server error on the reasoning key surfaces but never latches.
+  @Test func otherServerErrorOnReasoningDoesNotLatch() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("some other error"))
+    }
+
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: some other error"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  /// One failure path serves both keys: a rejected model switch rolls the chip back too.
+  @Test func rejectedModelSwitchRollsBackAndBanners() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(GatewayError.server("cannot switch mid-turn"))
+    }
+
+    await store.send(.modelSelected("gpt-5-mini")) {
+      $0.model = "gpt-5-mini"
+      $0.pendingConfigRollback.updateValue("gpt-5", forKey: "model")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.model = "gpt-5"
+      $0.pendingConfigRollback.removeValue(forKey: "model")
+      $0.errorBanner = "Couldn’t change model: cannot switch mid-turn"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  private struct UnexpectedFailure: Error {}
+
+  /// A non-`GatewayError` throw maps to `.disconnected`, same fallback as `model.options`.
+  @Test func nonGatewayErrorMapsToDisconnected() async {
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = failingConfigSet(UnexpectedFailure())
+    }
+
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: \(GatewayError.disconnected.message)"
+    }
+    await store.finish()
+    #expect(store.state.extendedReasoningSupported)
+  }
+
+  /// Two picks in a row: the FIRST one's late rejection must not clobber the second's value.
+  /// The newer `config.set` cancels the in-flight older one, so it never reaches
+  /// `.configSetFailed` — no rollback, no banner, and (worst case, since this stub answers the
+  /// 4002 verdict) no latch either.
+  @Test func supersededConfigSetFailureCannotClobberTheNewerPick() async {
+    let clock = TestClock()
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, params in
+        guard method == "config.set" else { return .object([:]) }
+        if params["value"]?.stringValue == "max" {
+          try await clock.sleep(for: .seconds(1)) // answers only after the second pick
+          throw GatewayError.server("unknown reasoning value: max")
+        }
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    // The second pick keeps the FIRST one's rollback target: "max" was never confirmed.
+    await store.send(.reasoningSelected("xhigh")) { $0.reasoningEffort = "xhigh" }
+    await clock.advance(by: .seconds(1))
+    await store.finish()
+
+    #expect(store.state.reasoningEffort == "xhigh")
+    #expect(store.state.extendedReasoningSupported)
+    #expect(store.state.errorBanner == nil)
+    #expect(store.state.modelPicker?.applyError == nil)
+  }
+
+  /// The supersession's other half: when the SECOND pick is the one that fails, the rollback
+  /// target is the last SERVER-confirmed value ("medium") — never the first pick's optimistic
+  /// "max", which the server never accepted (its request was cancelled).
+  @Test func supersededPickIsNotTheRollbackTargetForTheNewerFailure() async {
+    let clock = TestClock()
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, params in
+        guard method == "config.set" else { return .object([:]) }
+        if params["value"]?.stringValue == "max" {
+          try await clock.sleep(for: .seconds(1)) // never answers before it's cancelled
+          return .object([:])
+        }
+        throw GatewayError.server("cannot switch mid-turn")
+      }
+    }
+
+    await store.send(.reasoningSelected("max")) {
+      $0.reasoningEffort = "max"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.send(.reasoningSelected("xhigh")) { $0.reasoningEffort = "xhigh" }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium" // NOT "max"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: cannot switch mid-turn"
+      $0.modelPicker?.applyError = "Couldn’t change reasoning: cannot switch mid-turn"
+    }
+    await clock.advance(by: .seconds(1))
+    await store.finish()
+  }
+
+  /// An authoritative `session.info` is what CONFIRMS a key: it drops the rollback target, so the
+  /// next pick captures the server's own value instead of an older one.
+  @Test func sessionInfoConfirmationResetsTheRollbackTarget() async {
+    let failing = LockIsolated(false)
+    let store = TestStore(initialState: configuredState()) { ChatFeature() } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.chatSnapshot = .inMemory()
+      $0.hermesGateway.send = { @Sendable method, _ in
+        if method == "config.set", failing.value { throw GatewayError.server("busy") }
+        return .object([:])
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false) // the snapshot-persist debounce
+
+    await store.send(.reasoningSelected("high")) // accepted; rollback target is "medium"
+    await store.finish()
+    #expect(store.state.pendingConfigRollback["reasoning"] == .some("medium"))
+
+    await store.send(.gatewayEvent(.sessionInfo(SessionInfo(reasoningEffort: "high"))))
+    #expect(store.state.pendingConfigRollback["reasoning"] == nil) // confirmed, entry dropped
+
+    failing.setValue(true)
+    await store.send(.reasoningSelected("max"))
+    await store.receive(\.configSetFailed)
+    await store.finish()
+    #expect(store.state.reasoningEffort == "high") // the confirmed value, not the pre-info one
+  }
+
+  /// The rejection is mirrored inline into the open sheet (`errorBanner` alone sits behind the
+  /// modal), and a new pick clears both — nothing else does: a successful `config.set` has no
+  /// action and `session.info` leaves the banner alone, so a retry would read under the stale one.
+  @Test func aNewSelectionClearsThePreviousConfigError() async {
+    var initial = configuredState()
+    initial.modelPicker = ChatFeature.State.ModelPicker(isLoading: false)
+    let failing = LockIsolated(true)
+    let store = TestStore(initialState: initial) { ChatFeature() } withDependencies: {
+      $0.hermesGateway.send = { @Sendable method, _ in
+        if method == "config.set", failing.value { throw GatewayError.server("busy") }
+        return .object([:])
+      }
+    }
+
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+    }
+    await store.receive(\.configSetFailed) {
+      $0.reasoningEffort = "medium"
+      $0.pendingConfigRollback.removeValue(forKey: "reasoning")
+      $0.errorBanner = "Couldn’t change reasoning: busy"
+      $0.modelPicker?.applyError = "Couldn’t change reasoning: busy"
+    }
+
+    failing.setValue(false)
+    await store.send(.reasoningSelected("high")) {
+      $0.reasoningEffort = "high"
+      $0.pendingConfigRollback.updateValue("medium", forKey: "reasoning")
+      $0.errorBanner = nil
+      $0.modelPicker?.applyError = nil
+    }
+    await store.finish()
   }
 
   // MARK: Rename via gateway session.title (Task 4)
