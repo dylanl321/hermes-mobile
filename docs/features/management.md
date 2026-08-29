@@ -37,11 +37,13 @@ secrets in Keychain (Keychain stays `AuthSession` only).
 | `POST /api/env/reveal` | Unredact one key (optional; soft-gated) |
 
 Capability: first list 404/405 → hide API Keys. Profile: omit `?profile=` for default.
-Advanced keys stay hidden until the in-list toggle. Reveal uses the same `AuthSession` as
-other REST; on 401/403/404/405 the Reveal button is hidden for that agent and overwrite
-remains available (some agents only allow reveal from the web SPA). Never log reveal
-values or full `/api/env` bodies. Writes apply to new sessions; a running CLI may need
-`/reload`.
+Filters (local): search by key name, **Set only**, and **Show advanced** (advanced keys
+hidden by default). Reveal uses the same `AuthSession` as other REST; on 401/403/404/405
+the Reveal button is hidden for that agent and overwrite remains available (some agents
+only allow reveal from the web SPA). Revealed plaintext lives only in ephemeral edit
+state — shown in a disabled `SecureField` (no copy), auto-clears after ~30s or on dismiss;
+429 surfaces a rate-limit banner. Never log reveal values or full `/api/env` bodies.
+Writes apply to new sessions; a running CLI may need `/reload`.
 
 ## Workspaces (More / Settings → Workspaces)
 
