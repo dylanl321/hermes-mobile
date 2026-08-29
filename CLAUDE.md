@@ -89,7 +89,11 @@ bullets below are the compressed rules.
   screen, never onboarding (#62)**: only 401/403 falls back to prefilled onboarding;
   everything else (incl. `RESTError.offline`) populates `connectionFailed`.
   `ConnectionFailedFeature.isRetryable` is the ONE routing rule. Launch path only;
-  a foreground re-probe supersedes an in-flight one.
+  a foreground re-probe supersedes an in-flight one. The launch/retry `sessions` probe
+  is bounded by `connectionProbeTimeout` (15s) so a hanging DNS/private-network miss
+  can't leave the "Connecting…" spinner up for URLSession's 60s default. **Edit
+  connection** lands on the same prefilled onboarding as a credentials verdict without
+  wiping Keychain/prefs; **Log Out** remains the destructive wipe.
 
 ## Transcript & chat UI
 

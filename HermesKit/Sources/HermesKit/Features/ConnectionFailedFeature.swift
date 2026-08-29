@@ -12,10 +12,12 @@ import Foundation
 /// before, and if a *retry* from this screen comes back with a credentials verdict the
 /// reducer bubbles `.credentialsRejected` so the user ends up in the same place.
 ///
-/// Two ways out, only one of them destructive: **Retry** (plus a foreground auto-retry) and
-/// **Log Out**, behind a confirmation, which abandons the session. The view additionally links
-/// the `AgentSetupGuideView` sheet directly (view-local `@State`, as on the login screen), so
-/// connection help is one tap away.
+/// Three ways out, only one of them destructive: **Retry** (plus a foreground auto-retry),
+/// **Edit connection** (non-destructive — lands on prefilled onboarding so the URL/token can
+/// be fixed without wiping pins/cache), and **Log Out**, behind a confirmation, which
+/// abandons the session. The view additionally links the `AgentSetupGuideView` sheet
+/// directly (view-local `@State`, as on the login screen), so connection help is one tap
+/// away.
 ///
 /// The reducer is pure routing + the retry probe: clearing the keychain/prefs on
 /// `.logoutConfirmed` lives in `AppFeature`, next to the other full-logout recipe.
@@ -199,6 +201,10 @@ public struct ConnectionFailedFeature {
     /// The app came back to the foreground — re-probe (the user very likely just turned the
     /// VPN back on, which is exactly the moment a manual tap is most annoying).
     case sceneBecameActive
+    /// Non-destructive escape: the URL (or token) needs editing. Bubbles
+    /// `.editConnectionRequested` so `AppFeature` can land on prefilled onboarding without
+    /// wiping the Keychain session / prefs — Log Out remains the destructive alternative.
+    case editConnectionTapped
     /// Log Out button — raises the confirmation; only `.confirmLogout` actually logs out.
     case logoutButtonTapped
     case confirmationDialog(PresentationAction<Dialog>)
@@ -221,6 +227,9 @@ public struct ConnectionFailedFeature {
       /// The retry reached the server and it rejected us (401 and friends) — retrying can't
       /// fix that, so fall back to onboarding for re-entry.
       case credentialsRejected(ServerConnection)
+      /// The user wants to edit the URL / credentials without abandoning the saved session.
+      /// `AppFeature` lands on the same prefilled onboarding `.credentialsRejected` uses.
+      case editConnectionRequested(ServerConnection)
       /// The user confirmed the Log Out dialog — abandon the stored session, and `AppFeature`
       /// runs the full-logout recipe. Named for the *outcome*, like its siblings: the bare
       /// button tap is `Action.logoutButtonTapped` and only raises the confirmation.
@@ -228,9 +237,9 @@ public struct ConnectionFailedFeature {
     }
   }
 
-  /// The retry probe. Cancellable so a foreground can supersede a stalled one — `URLSession`'s
-  /// default request timeout is 60s, and without this a probe that never resolves would leave
-  /// `isRetrying` latched and both the spinner and the guard stuck forever.
+  /// The retry probe. Cancellable so a foreground can supersede a stalled one — and bounded
+  /// by `connectionProbeTimeout` so a probe that never resolves can't leave `isRetrying`
+  /// latched past ~15s (URLSession's own default is 60s).
   ///
   /// **Cancelling it cannot cost a cookie-mode user their session**, even though a probe *is*
   /// the kind of gated request that can trigger the agent's transparent server-side refresh
@@ -258,6 +267,7 @@ public struct ConnectionFailedFeature {
   private enum CancelID { case probe }
 
   @Dependency(\.hermesREST) var rest
+  @Dependency(\.continuousClock) var clock
 
   public init() {}
 
@@ -276,6 +286,9 @@ public struct ConnectionFailedFeature {
         // would make a probe whose result never lands brick the screen permanently; the user
         // returning to the app is precisely the signal that the network just changed.
         return probe(&state)
+
+      case .editConnectionTapped:
+        return .send(.delegate(.editConnectionRequested(state.connection)))
 
       case .retrySucceeded:
         state.isRetrying = false
@@ -323,15 +336,17 @@ public struct ConnectionFailedFeature {
   }
 
   /// Start (or restart) the retry probe. Shared by the manual tap and the foreground so both
-  /// use the same connection, the same page shape as launch auto-connect, and the same
-  /// cancellation id.
+  /// use the same connection, the same page shape as launch auto-connect, the same
+  /// `connectionProbeTimeout` bound, and the same cancellation id.
   private func probe(_ state: inout State) -> Effect<Action> {
     state.isRetrying = true
     let connection = state.connection
-    return .run { [rest] send in
+    return .run { [rest, clock] send in
       do {
-        _ = try await rest.sessions(connection, 1, 0, .recent)
+        _ = try await probeSessions(rest, connection: connection, clock: clock)
         await send(.retrySucceeded)
+      } catch is CancellationError {
+        // Superseded by a newer probe / torn down with the screen — don't refresh the reason.
       } catch {
         await send(.retryFailed(asRESTError(error)))
       }

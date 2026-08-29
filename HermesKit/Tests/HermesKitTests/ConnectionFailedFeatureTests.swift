@@ -394,8 +394,8 @@ struct ConnectionFailedFeatureTests {
 
   /// A foreground deliberately SUPERSEDES an in-flight probe rather than being swallowed:
   /// still exactly one probe at a time (one result lands, not two), but a probe whose result
-  /// never arrives — `URLSession`'s default request timeout is 60s — can never brick the
-  /// screen with a latched `isRetrying`.
+  /// never arrives — even inside `connectionProbeTimeout` — can never brick the screen with
+  /// a latched `isRetrying`.
   @Test func foregroundSupersedesAStalledProbe() async {
     let (stall, releaseStall) = AsyncStream<Void>.makeStream()
     let probes = LockIsolated(0)
@@ -425,6 +425,65 @@ struct ConnectionFailedFeatureTests {
 
   // MARK: - Logout
 
+  /// Edit connection is the non-destructive escape hatch: it delegates immediately (no
+  /// confirmation) so `AppFeature` can land on prefilled onboarding without wiping the
+  /// Keychain session. Log Out remains the destructive alternative.
+  @Test func editConnectionDelegatesImmediately() async {
+    let store = TestStore(initialState: state(connection: cookieConnection, reason: .offline)) {
+      ConnectionFailedFeature()
+    }
+
+    await store.send(.editConnectionTapped)
+    await store.receive(\.delegate, .editConnectionRequested(cookieConnection))
+  }
+
+  /// Edit connection stays available while a probe is in flight — same invariant as Log Out
+  /// and the help link: a hanging probe must not trap the user on this screen.
+  @Test func editConnectionWorksWhileAProbeIsInFlight() async {
+    let (gate, release) = AsyncStream<Void>.makeStream()
+    let store = TestStore(initialState: state()) {
+      ConnectionFailedFeature()
+    } withDependencies: {
+      $0.hermesREST.sessions = { @Sendable _, _, _, _ in
+        for await _ in gate { break }
+        return []
+      }
+    }
+
+    await store.send(.retryTapped) { $0.isRetrying = true }
+    await store.send(.editConnectionTapped)
+    await store.receive(\.delegate, .editConnectionRequested(connection))
+    release.yield()
+    release.finish()
+    await store.receive(\.retrySucceeded) { $0.isRetrying = false }
+    await store.receive(\.delegate, .connected(connection))
+  }
+
+  /// A probe that never answers is cut off at `connectionProbeTimeout` and surfaces as
+  /// `.unreachable` — without this bound, `URLSession`'s 60s default would leave the
+  /// Retry spinner latched for a full minute on a dead private-network route.
+  @Test func probeTimeoutSurfacesAsUnreachable() async {
+    let clock = TestClock()
+    let (stall, releaseStall) = AsyncStream<Void>.makeStream()
+    let store = TestStore(initialState: state(reason: .offline)) {
+      ConnectionFailedFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.hermesREST.sessions = { @Sendable _, _, _, _ in
+        for await _ in stall { break }
+        return []
+      }
+    }
+
+    await store.send(.retryTapped) { $0.isRetrying = true }
+    await clock.advance(by: connectionProbeTimeout)
+    await store.receive(\.retryFailed) {
+      $0.isRetrying = false
+      $0.reason = .unreachable
+    }
+    releaseStall.finish()
+  }
+
   /// Log Out wipes the keychain session, every pref and the chat cache — it confirms first,
   /// and only the confirmation delegates up.
   @Test func logoutConfirmsBeforeDelegatingUp() async {
@@ -446,7 +505,7 @@ struct ConnectionFailedFeatureTests {
   }
 
   /// Log Out stays available while a probe is in flight — the view never disables it, and the
-  /// reducer must honour it (a 60s probe must not trap the user on this screen).
+  /// reducer must honour it (a hanging probe must not trap the user on this screen).
   @Test func logoutWorksWhileAProbeIsInFlight() async {
     let (gate, release) = AsyncStream<Void>.makeStream()
     let store = TestStore(initialState: state()) {
