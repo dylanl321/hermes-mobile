@@ -43,7 +43,9 @@ the Reveal button is hidden for that agent and overwrite remains available (some
 only allow reveal from the web SPA). Revealed plaintext lives only in ephemeral edit
 state — shown in a disabled `SecureField` (no copy), auto-clears after ~30s or on dismiss;
 429 surfaces a rate-limit banner. Never log reveal values or full `/api/env` bodies.
-Writes apply to new sessions; a running CLI may need `/reload`.
+Writes apply to new sessions; a running process may need a gateway restart (planned
+System “Restart gateway to apply” offer after save — see
+[`system-management.md`](system-management.md)). CLI `/reload` remains host-side only.
 
 ## Workspaces (More / Settings → Workspaces)
 
@@ -95,6 +97,19 @@ slot (logout policy for UI) but keeps other servers’ credentials.
 Enriched `GET /api/status` (gateway + memory/disk pressure) and
 `GET /api/analytics/usage?days=`. Compact strip under the Sessions header.
 Analytics 404 → hide usage only.
+
+When the messaging gateway is **stopped**, the strip shows “Gateway stopped” in
+warning style with an inline **Start** (if gateway lifecycle is supported). Tapping
+the strip opens **System** when that surface is available.
+
+## System / Host / Update
+
+Host stats, Hermes self-update (check / apply / receipt), gateway lifecycle, and
+Operations actions (doctor, audit, backup, …). Authenticated dashboard REST only —
+not the push plugin. Invariants: [`system-management.md`](system-management.md).
+
+Entry: Settings → **System**, More → **System**. After config quick-edit or API Key
+save/delete, offer confirmed gateway restart when supported.
 
 ## Privacy
 

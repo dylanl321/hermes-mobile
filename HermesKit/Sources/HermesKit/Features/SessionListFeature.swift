@@ -178,6 +178,8 @@ public struct SessionListFeature {
     public var usageAnalytics: UsageAnalytics?
     /// Whether the agent exposes usage analytics (set false on a definitive 404).
     public var analyticsSupported: Bool
+    /// In-flight Start from the home ops strip (gateway was stopped).
+    public var isStartingGatewayFromStrip: Bool
     /// Non-`nil` while the transient "Session ID copied" toast is showing. Purely transient
     /// confirmation state: raised by a copy, cleared by the timed expiry. It's a counter
     /// rather than a `Bool` so a re-copy while the toast is already up is still an
@@ -206,6 +208,12 @@ public struct SessionListFeature {
     @Presents public var skills: SkillsFeature.State?
     /// Whether the agent exposes `/api/skills` (optimistic true; flipped off on 404).
     public var skillsSupported: Bool
+    /// System / Host / Update sheet (`/api/system/stats`). Hosted like Skills.
+    @Presents public var system: SystemFeature.State?
+    /// Whether the agent exposes System stats (optimistic true; flipped off on 404).
+    public var systemSupported: Bool
+    /// Whether gateway lifecycle routes work (seeded into Settings for post-edit restart).
+    public var gatewaySupported: Bool
     @Presents public var addProfile: AddProfileFeature.State?
     @Presents public var confirmationDialog: ConfirmationDialogState<Action.Dialog>?
 
@@ -256,11 +264,14 @@ public struct SessionListFeature {
       serverStatus: ServerStatus? = nil,
       usageAnalytics: UsageAnalytics? = nil,
       analyticsSupported: Bool = true,
+      isStartingGatewayFromStrip: Bool = false,
       copiedIDToastToken: Int? = nil,
       settings: SettingsFeature.State? = nil,
       addProfile: AddProfileFeature.State? = nil,
       fsSupported: Bool = true,
-      skillsSupported: Bool = true
+      skillsSupported: Bool = true,
+      systemSupported: Bool = true,
+      gatewaySupported: Bool = true
     ) {
       self.connection = connection
       self.sessions = sessions
@@ -294,11 +305,14 @@ public struct SessionListFeature {
       self.serverStatus = serverStatus
       self.usageAnalytics = usageAnalytics
       self.analyticsSupported = analyticsSupported
+      self.isStartingGatewayFromStrip = isStartingGatewayFromStrip
       self.copiedIDToastToken = copiedIDToastToken
       self.settings = settings
       self.addProfile = addProfile
       self.fsSupported = fsSupported
       self.skillsSupported = skillsSupported
+      self.systemSupported = systemSupported
+      self.gatewaySupported = gatewaySupported
     }
 
     /// Whether the currently-selected profile is the default (no `?profile=` scoping for
@@ -394,6 +408,11 @@ public struct SessionListFeature {
     /// Whether the home ops strip has anything to show (gateway status and/or analytics).
     public var opsStripVisible: Bool {
       serverStatus != nil || (analyticsSupported && usageAnalytics != nil)
+    }
+
+    /// Gateway is down and we can offer Start on the strip (System gateway routes work).
+    public var showStartGatewayOnStrip: Bool {
+      gatewaySupported && (serverStatus?.isGatewayStopped == true)
     }
 
     /// Desktop-parity job ordering: soonest next run first, jobs without a next run sink
@@ -555,6 +574,9 @@ public struct SessionListFeature {
     /// Open the Skills sheet (More menu / Settings → Skills).
     case skillsButtonTapped
     case skills(PresentationAction<SkillsFeature.Action>)
+    /// Open the System sheet (More menu / Settings → System).
+    case systemButtonTapped
+    case system(PresentationAction<SystemFeature.Action>)
     /// Open the Workspaces browser sheet (More menu / Settings → Workspaces).
     case workspacesButtonTapped
     /// Jump straight into a session’s `cwd` in the Workspaces browser.
@@ -637,6 +659,11 @@ public struct SessionListFeature {
     /// Result of `GET /api/analytics/usage?days=30`; a definitive 404 flips
     /// `analyticsSupported` off silently.
     case usageAnalyticsResponse(Result<UsageAnalytics, RESTError>)
+    /// Tap the home ops strip — opens System when the agent supports it.
+    case opsStripTapped
+    /// Start the messaging gateway from the strip while it’s stopped (no confirm).
+    case startGatewayFromStripTapped
+    case gatewayStartFromStripFinished(Result<ServerStatus?, RESTError>)
     // MARK: Push notifications
     /// Kicks off contextual push setup once the list appears (right after login): first probe
     /// the `hermes-push` plugin readiness, then branch on the result. Fired from `.task`.
@@ -700,7 +727,7 @@ public struct SessionListFeature {
   // One id for BOTH the list fetch and the search fetch: any new fetch (list refresh, poll,
   // or search) cancels the previous in-flight one, so a late list response can't overwrite
   // active search results (and vice versa). `poll` is the separate timer loop.
-  private enum CancelID { case fetch, poll, pushTokens, copyIDToast }
+  private enum CancelID { case fetch, poll, pushTokens, copyIDToast, gatewayStartFromStrip }
 
   /// How often the list auto-refreshes while visible, to keep `isActive` (working glow) fresh.
   private static let pollInterval: Duration = .seconds(10)
@@ -959,6 +986,57 @@ public struct SessionListFeature {
           state.analyticsSupported = false
           state.usageAnalytics = nil
         }
+        return .none
+
+      case .opsStripTapped:
+        guard state.systemSupported else { return .none }
+        state.settings = nil
+        state.system = SystemFeature.State(
+          connection: state.connection,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported,
+          serverStatus: state.serverStatus
+        )
+        return .none
+
+      case .startGatewayFromStripTapped:
+        guard state.showStartGatewayOnStrip, !state.isStartingGatewayFromStrip else {
+          return .none
+        }
+        state.isStartingGatewayFromStrip = true
+        state.loadError = nil
+        let conn = state.connection
+        return .run { [rest, clock] send in
+          do {
+            _ = try await rest.gatewayLifecycle(conn, .start)
+            // Brief pause so status can flip before we re-probe.
+            try await clock.sleep(for: .seconds(1))
+            let status = try? await rest.status(conn.baseURL)
+            await send(.gatewayStartFromStripFinished(.success(status)))
+          } catch {
+            await send(.gatewayStartFromStripFinished(.failure(asRESTError(error))))
+          }
+        }
+        .cancellable(id: CancelID.gatewayStartFromStrip, cancelInFlight: true)
+
+      case let .gatewayStartFromStripFinished(.success(status)):
+        state.isStartingGatewayFromStrip = false
+        if let status {
+          state.serverStatus = status
+        }
+        return .none
+
+      case let .gatewayStartFromStripFinished(.failure(error)):
+        state.isStartingGatewayFromStrip = false
+        if error.isMissingEndpointVerdict {
+          state.gatewaySupported = false
+          if var settings = state.settings {
+            settings.gatewaySupported = false
+            state.settings = settings
+          }
+          return .none
+        }
+        state.loadError = error.message
         return .none
 
       case .setupPush:
@@ -1414,7 +1492,9 @@ public struct SessionListFeature {
           deleteSupported: state.deleteSupported,
           profile: state.scopedProfileName,
           skillsSupported: state.skillsSupported,
-          fsSupported: state.fsSupported
+          fsSupported: state.fsSupported,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
         )
         return .none
 
@@ -1457,6 +1537,49 @@ public struct SessionListFeature {
         return .none
 
       case .skills:
+        return .none
+
+      case .systemButtonTapped:
+        guard state.systemSupported else { return .none }
+        state.settings = nil
+        state.system = SystemFeature.State(
+          connection: state.connection,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
+        )
+        return .none
+
+      case .system(.presented(.delegate(.dismiss))):
+        state.system = nil
+        return .none
+
+      case .system(.presented(.delegate(.systemUnsupported))):
+        state.systemSupported = false
+        state.system = nil
+        if var settings = state.settings {
+          settings.systemSupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .system(.presented(.delegate(.gatewayUnsupported))):
+        state.gatewaySupported = false
+        if var system = state.system {
+          system.gatewaySupported = false
+          state.system = system
+        }
+        if var settings = state.settings {
+          settings.gatewaySupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .system(.presented(.delegate(.gatewayLifecycleCompleted))):
+        return .run { [rest, baseURL = state.connection.baseURL] send in
+          await send(fetchServerStatus(rest: rest, baseURL: baseURL))
+        }
+
+      case .system:
         return .none
 
       case .workspacesButtonTapped:
@@ -1507,6 +1630,16 @@ public struct SessionListFeature {
           connection: state.connection,
           profile: state.scopedProfileName,
           skillsSupported: state.skillsSupported
+        )
+        return .none
+
+      case .settings(.presented(.delegate(.openSystem))):
+        guard state.systemSupported else { return .none }
+        state.settings = nil
+        state.system = SystemFeature.State(
+          connection: state.connection,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
         )
         return .none
 
@@ -1790,6 +1923,9 @@ public struct SessionListFeature {
     }
     .ifLet(\.$skills, action: \.skills) {
       SkillsFeature()
+    }
+    .ifLet(\.$system, action: \.system) {
+      SystemFeature()
     }
     .ifLet(\.$addProfile, action: \.addProfile) {
       AddProfileFeature()

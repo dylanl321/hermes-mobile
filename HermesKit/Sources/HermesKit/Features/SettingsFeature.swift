@@ -51,8 +51,16 @@ public struct SettingsFeature {
     public var envSupported: Bool
     /// Optimistic: hide Workspaces after `/api/fs` 404/405.
     public var fsSupported: Bool
+    /// Optimistic: hide System after `/api/system/stats` 404/405.
+    public var systemSupported: Bool
+    /// Whether `POST /api/gateway/restart` is available for post-edit apply.
+    public var gatewaySupported: Bool
     /// Pushed via `navigationDestination` — API Keys / `.env` editor.
     @Presents public var env: EnvFeature.State?
+    /// Restart-to-apply confirmation after config/env writes.
+    @Presents public var confirmationDialog: ConfirmationDialogState<Action.Dialog>?
+    public var isRestartingGateway: Bool
+    public var restartFootnote: String?
     /// Optimistic: hide Quick edits after config 404.
     public var configSupported: Bool
     public var configDocument: JSONValue?
@@ -100,7 +108,12 @@ public struct SettingsFeature {
       skillsSupported: Bool = true,
       envSupported: Bool = true,
       fsSupported: Bool = true,
+      systemSupported: Bool = true,
+      gatewaySupported: Bool = true,
       env: EnvFeature.State? = nil,
+      confirmationDialog: ConfirmationDialogState<Action.Dialog>? = nil,
+      isRestartingGateway: Bool = false,
+      restartFootnote: String? = nil,
       configSupported: Bool = true,
       configDocument: JSONValue? = nil,
       isLoadingConfig: Bool = false,
@@ -128,7 +141,12 @@ public struct SettingsFeature {
       self.skillsSupported = skillsSupported
       self.envSupported = envSupported
       self.fsSupported = fsSupported
+      self.systemSupported = systemSupported
+      self.gatewaySupported = gatewaySupported
       self.env = env
+      self.confirmationDialog = confirmationDialog
+      self.isRestartingGateway = isRestartingGateway
+      self.restartFootnote = restartFootnote
       self.configSupported = configSupported
       self.configDocument = configDocument
       self.isLoadingConfig = isLoadingConfig
@@ -206,7 +224,11 @@ public struct SettingsFeature {
     case openSkillsTapped
     case openEnvTapped
     case openWorkspacesTapped
+    case openSystemTapped
     case env(PresentationAction<EnvFeature.Action>)
+    case confirmationDialog(PresentationAction<Dialog>)
+    case offerGatewayRestart
+    case gatewayRestartFinished(Result<Void, RESTError>)
     case configResponse(Result<JSONValue, RESTError>)
     case setConfigBool(ConfigQuickEditKey, Bool)
     case setConfigString(ConfigQuickEditKey, String)
@@ -227,6 +249,10 @@ public struct SettingsFeature {
       case failed(String)
     }
 
+    public enum Dialog: Equatable, Sendable {
+      case confirmGatewayRestart
+    }
+
     @CasePathable
     public enum Delegate {
       case disconnect             // token cleared → back to onboarding
@@ -242,13 +268,15 @@ public struct SettingsFeature {
       /// Open the Skills sheet — parent dismisses Settings and presents Skills on the
       /// list host (same pattern as Workspaces).
       case openSkills
+      /// Open the System sheet — parent dismisses Settings and presents System on the list.
+      case openSystem
       /// Open the agent workspace browser — parent dismisses Settings and presents the
       /// Workspaces sheet (keeps FS effects on the list host).
       case openWorkspaces
     }
   }
 
-  private enum CancelID { case logStream }
+  private enum CancelID { case logStream, gatewayRestart }
 
   @Dependency(\.keychain) var keychain
   @Dependency(\.preferences) var preferences
@@ -463,6 +491,10 @@ public struct SettingsFeature {
         guard state.skillsSupported else { return .none }
         return .send(.delegate(.openSkills))
 
+      case .openSystemTapped:
+        guard state.systemSupported else { return .none }
+        return .send(.delegate(.openSystem))
+
       case .openEnvTapped:
         guard state.envSupported else { return .none }
         state.env = EnvFeature.State(
@@ -481,7 +513,63 @@ public struct SettingsFeature {
         state.env = nil
         return .none
 
+      case .env(.presented(.delegate(.requestApplyRestart))):
+        return .send(.offerGatewayRestart)
+
       case .env:
+        return .none
+
+      case .offerGatewayRestart:
+        if state.gatewaySupported {
+          state.confirmationDialog = ConfirmationDialogState {
+            TextState("Restart gateway?")
+          } actions: {
+            ButtonState(action: .confirmGatewayRestart) { TextState("Restart") }
+            ButtonState(role: .cancel) { TextState("Cancel") }
+          } message: {
+            TextState("Restart the messaging gateway so config and API key changes take effect.")
+          }
+          state.restartFootnote = nil
+        } else {
+          state.restartFootnote = "Restart the agent host for some changes to apply."
+        }
+        return .none
+
+      case .confirmationDialog(.presented(.confirmGatewayRestart)):
+        state.confirmationDialog = nil
+        guard state.gatewaySupported, !state.isRestartingGateway else { return .none }
+        state.isRestartingGateway = true
+        let conn = state.connection
+        return .run { [rest] send in
+          do {
+            _ = try await rest.gatewayLifecycle(conn, .restart)
+            await send(.gatewayRestartFinished(.success(())))
+          } catch {
+            await send(.gatewayRestartFinished(.failure(asRESTError(error))))
+          }
+        }
+        .cancellable(id: CancelID.gatewayRestart, cancelInFlight: true)
+
+      case .confirmationDialog(.dismiss):
+        state.confirmationDialog = nil
+        return .none
+
+      case .confirmationDialog:
+        return .none
+
+      case .gatewayRestartFinished(.success):
+        state.isRestartingGateway = false
+        state.restartFootnote = "Gateway restart requested."
+        return .none
+
+      case let .gatewayRestartFinished(.failure(error)):
+        state.isRestartingGateway = false
+        if error.isMissingEndpointVerdict {
+          state.gatewaySupported = false
+          state.restartFootnote = "Restart the agent host for some changes to apply."
+          return .none
+        }
+        state.restartFootnote = error.message
         return .none
 
       case let .configResponse(.success(config)):
@@ -522,7 +610,7 @@ public struct SettingsFeature {
         state.configDocument = config
         state.configError = nil
         _ = key
-        return .none
+        return .send(.offerGatewayRestart)
 
       case let .configSaveFinished(_, .failure(error)):
         state.configSavingKey = nil
@@ -581,6 +669,7 @@ public struct SettingsFeature {
     .ifLet(\.$env, action: \.env) {
       EnvFeature()
     }
+    .ifLet(\.$confirmationDialog, action: \.confirmationDialog)
   }
 
   private func loadConfig(_ state: State) -> Effect<Action> {

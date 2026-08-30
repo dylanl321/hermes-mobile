@@ -79,5 +79,15 @@ struct UsageAnalyticsTests {
     #expect(status.gatewayState == "running")
     #expect(status.worstPressure == "critical")
     #expect(status.memory?.isElevatedOrWorse == true)
+    #expect(!status.isGatewayStopped)
+    #expect(status.gatewayStateDisplayLabel == "Running")
+  }
+
+  @Test func gatewayStoppedDisplayLabel() throws {
+    let stopped: ServerStatus = try decode(
+      #"{"version":"0.20.5","gateway_state":"stopped","gateway_running":false}"#
+    )
+    #expect(stopped.isGatewayStopped)
+    #expect(stopped.gatewayStateDisplayLabel == "Gateway stopped")
   }
 }

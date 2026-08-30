@@ -49,6 +49,9 @@ struct SettingsView: View {
     ) { envStore in
       EnvView(store: envStore)
     }
+    .bottomActionSheet(
+      $store.scope(state: \.confirmationDialog, action: \.confirmationDialog)
+    )
   }
 
   // MARK: - Sections (split so the type checker stays under budget)
@@ -61,8 +64,15 @@ struct SettingsView: View {
 
   @ViewBuilder
   private var managementSection: some View {
-    if store.skillsSupported || store.envSupported || store.fsSupported {
+    if store.skillsSupported || store.envSupported || store.fsSupported || store.systemSupported {
       Section("Management") {
+        if store.systemSupported {
+          Button {
+            store.send(.openSystemTapped)
+          } label: {
+            Label("System", systemImage: "server.rack")
+          }
+        }
         if store.skillsSupported {
           Button {
             store.send(.openSkillsTapped)
@@ -83,6 +93,15 @@ struct SettingsView: View {
           } label: {
             Label("Workspaces", systemImage: "folder")
           }
+        }
+        if store.isRestartingGateway {
+          Label("Restarting gateway…", systemImage: "arrow.triangle.2.circlepath")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        } else if let footnote = store.restartFootnote {
+          Text(footnote)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
       }
     }

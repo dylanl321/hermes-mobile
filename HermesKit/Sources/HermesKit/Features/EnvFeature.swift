@@ -139,6 +139,8 @@ public struct EnvFeature {
     @CasePathable
     public enum Delegate {
       case envUnsupported
+      /// Parent should offer gateway restart so the written .env takes effect.
+      case requestApplyRestart
     }
   }
 
@@ -228,7 +230,8 @@ public struct EnvFeature {
         state.isLoading = true
         return .merge(
           .cancel(id: CancelID.revealDwell),
-          loadEnv(state)
+          loadEnv(state),
+          .send(.delegate(.requestApplyRestart))
         )
 
       case let .saveFinished(.failure(error)):
@@ -328,7 +331,8 @@ public struct EnvFeature {
         state.isLoading = true
         return .merge(
           .cancel(id: CancelID.revealDwell),
-          loadEnv(state)
+          loadEnv(state),
+          .send(.delegate(.requestApplyRestart))
         )
 
       case let .deleteFinished(.failure(error)):
