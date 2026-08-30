@@ -2,19 +2,14 @@ import ComposableArchitecture
 import HermesKit
 import SwiftUI
 
-/// The chat screen's nav-bar ellipsis menu (Rename / Copy ID / Open workspace), split out
-/// of `ChatView` so it observes ONLY the fields it renders (#82).
+/// The chat screen's nav-bar ellipsis menu (Rename / Copy ID / Open workspace).
 ///
-/// `ChatView.body` re-evaluates on every streaming change — each `message.delta`, tool
-/// start/complete, status update, and thinking tick — because it reads `visibleRows`,
-/// `isSending`, and friends. While this menu lived inline in `ChatView`'s `.toolbar { }`,
-/// every one of those re-evaluations rebuilt the `Menu` and its label, and the toolbar
-/// button replayed its appearance each time; with back-to-back tool calls that is the
-/// visible flicker loop the tester reported on the icon.
-///
-/// As a child view holding the store — a reference, which SwiftUI diffs by identity, so the
-/// parent's re-render alone does not re-run this body — Observation re-evaluates it only
-/// when `canRename` / `sessionKey` / `canOpenWorkspace` change, not on every stream delta.
+/// #82: streaming must not re-animate this control. Two layers keep it stable:
+/// 1. `ChatView` is a chrome shell — its body does not read transcript / `isSending` /
+///    thinking state, so stream deltas never recreate the `ToolbarItem` that hosts us.
+/// 2. This view itself observes ONLY `canRename` / `sessionKey` / `canOpenWorkspace`, so
+///    even a rare chrome re-render (title rename, sheet) does not rebuild the `Menu`
+///    unless those fields change.
 ///
 /// Deliberately takes the STORE rather than `canRename:` / `onRename:` parameters: closure
 /// fields are not comparable, so SwiftUI would have to re-run the body on every parent

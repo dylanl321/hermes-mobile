@@ -2,9 +2,111 @@ import ComposableArchitecture
 import HermesKit
 import SwiftUI
 
-/// The chat screen: a scrolling transcript, a transient error footer, and
-/// the composer. Streams over the gateway via `ChatFeature`.
+/// The chat screen shell: navigation chrome + lifecycle sheets/alerts.
+///
+/// Streaming UI lives in `ChatScreenBody`. Keeping title/toolbar here matters for #82 —
+/// Observation only re-runs *this* body when chrome-relevant state changes (`title`,
+/// rename/sheet presentation). Deltas, tool rows, and thinking ticks invalidate the
+/// child alone, so the trailing ⋯ `ToolbarItem` is not recreated (and re-animated) on
+/// every stream event.
 struct ChatView: View {
+  @Bindable var store: StoreOf<ChatFeature>
+
+  var body: some View {
+    ChatScreenBody(store: store)
+      .navigationTitle(store.title ?? "Chat")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          ChatMenuButton(store: store)
+        }
+      }
+      .alert("Rename session", isPresented: renameBinding) {
+        TextField("Title", text: renameDraftBinding)
+        Button("Save") { store.send(.confirmRename) }
+        Button("Cancel", role: .cancel) { store.send(.cancelRename) }
+      }
+      .task { store.send(.task) }
+      // NOTE: no `.onDisappear` here — disappearance is observed by the DESTINATION in
+      // `AppView` (`AppFeature.chatViewDisappeared`), which guards a nil slot and forwards
+      // the mic/voice cleanup (`.viewDisappeared`). Slot teardown is an `AppFeature` policy,
+      // not a view event.
+      .sheet(item: toolDetailBinding) { row in
+        if case let .tool(name, title, _, detail, durationS) = row.kind {
+          ToolDetailSheet(name: name, title: title, detail: detail ?? ToolDetail(), durationS: durationS)
+        }
+      }
+      .sheet(isPresented: modelPickerBinding) {
+        ChatModelPickerHost(store: store)
+      }
+  }
+
+  /// Snapshot tests call `ChatView.rowView` — forward to the streaming body that owns the
+  /// cell rendering.
+  @ViewBuilder
+  func rowView(_ row: ChatRow) -> some View {
+    ChatScreenBody(store: store).rowView(row)
+  }
+
+  /// Drives the rename alert's presentation; dismissing routes through `.cancelRename`.
+  private var renameBinding: Binding<Bool> {
+    Binding(
+      get: { store.renameDraft != nil },
+      set: { if !$0 { store.send(.cancelRename) } }
+    )
+  }
+
+  /// A non-optional proxy over the optional draft so the `TextField` stays authoritative
+  /// in the reducer (writes go through the binding action).
+  private var renameDraftBinding: Binding<String> {
+    Binding(
+      get: { store.renameDraft ?? "" },
+      set: { store.renameDraft = $0 }
+    )
+  }
+
+  private var modelPickerBinding: Binding<Bool> {
+    Binding(
+      get: { store.modelPicker != nil },
+      set: { if !$0 { store.send(.modelPickerDismissed) } }
+    )
+  }
+
+  /// Drives the tool-detail sheet; dismissing routes through the reducer.
+  private var toolDetailBinding: Binding<ChatRow?> {
+    Binding(
+      get: { store.presentedTool },
+      set: { if $0 == nil { store.send(.toolDetailDismissed) } }
+    )
+  }
+}
+
+/// Model picker sheet content, isolated so opening it does not subscribe the chat shell to
+/// `isSending` / model fields used inside the sheet (those would otherwise re-run
+/// `ChatView.body` — and recreate the toolbar — on every stream tick while the sheet is up).
+private struct ChatModelPickerHost: View {
+  let store: StoreOf<ChatFeature>
+
+  var body: some View {
+    if let picker = store.modelPicker {
+      ModelPickerSheet(
+        picker: picker,
+        currentModel: store.model,
+        currentEffort: store.reasoningEffort,
+        isBusy: store.isSending,
+        extendedReasoningSupported: store.extendedReasoningSupported,
+        onSelectModel: { store.send(.modelSelected($0)) },
+        onSelectEffort: { store.send(.reasoningSelected($0)) },
+        onDone: { store.send(.modelPickerDismissed) }
+      )
+    }
+  }
+}
+
+/// Transcript, composer, cards, banners — everything that churns while a turn streams.
+/// Separated from `ChatView` so Observation does not invalidate the nav-bar toolbar on
+/// each delta (#82).
+struct ChatScreenBody: View {
   @Bindable var store: StoreOf<ChatFeature>
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -80,77 +182,6 @@ struct ChatView: View {
     // Same treatment for the queued-prompt panel (#66): animate appear/disappear (keyed
     // to emptiness, so edits/reorders within the queue never animate the whole region).
     .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: store.queuedPrompts.isEmpty)
-    .navigationTitle(store.title ?? "Chat")
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        // A separate view, not an inline `Menu`: this body re-runs on every streaming
-        // event, and an inline menu was rebuilt (and its toolbar button re-animated) each
-        // time — the #82 flicker loop. `ChatMenuButton` observes only its own two fields.
-        ChatMenuButton(store: store)
-      }
-    }
-    .alert("Rename session", isPresented: renameBinding) {
-      TextField("Title", text: renameDraftBinding)
-      Button("Save") { store.send(.confirmRename) }
-      Button("Cancel", role: .cancel) { store.send(.cancelRename) }
-    }
-    .task { store.send(.task) }
-    // NOTE: no `.onDisappear` here — disappearance is observed by the DESTINATION in
-    // `AppView` (`AppFeature.chatViewDisappeared`), which guards a nil slot and forwards
-    // the mic/voice cleanup (`.viewDisappeared`). Slot teardown is an `AppFeature` policy,
-    // not a view event.
-    .sheet(item: toolDetailBinding) { row in
-      if case let .tool(name, title, _, detail, durationS) = row.kind {
-        ToolDetailSheet(name: name, title: title, detail: detail ?? ToolDetail(), durationS: durationS)
-      }
-    }
-    .sheet(isPresented: modelPickerBinding) {
-      if let picker = store.modelPicker {
-        ModelPickerSheet(
-          picker: picker,
-          currentModel: store.model,
-          currentEffort: store.reasoningEffort,
-          isBusy: store.isSending,
-          extendedReasoningSupported: store.extendedReasoningSupported,
-          onSelectModel: { store.send(.modelSelected($0)) },
-          onSelectEffort: { store.send(.reasoningSelected($0)) },
-          onDone: { store.send(.modelPickerDismissed) }
-        )
-      }
-    }
-  }
-
-  /// Drives the rename alert's presentation; dismissing routes through `.cancelRename`.
-  private var renameBinding: Binding<Bool> {
-    Binding(
-      get: { store.renameDraft != nil },
-      set: { if !$0 { store.send(.cancelRename) } }
-    )
-  }
-
-  /// A non-optional proxy over the optional draft so the `TextField` stays authoritative
-  /// in the reducer (writes go through the binding action).
-  private var renameDraftBinding: Binding<String> {
-    Binding(
-      get: { store.renameDraft ?? "" },
-      set: { store.renameDraft = $0 }
-    )
-  }
-
-  private var modelPickerBinding: Binding<Bool> {
-    Binding(
-      get: { store.modelPicker != nil },
-      set: { if !$0 { store.send(.modelPickerDismissed) } }
-    )
-  }
-
-  /// Drives the tool-detail sheet; dismissing routes through the reducer.
-  private var toolDetailBinding: Binding<ChatRow?> {
-    Binding(
-      get: { store.presentedTool },
-      set: { if $0 == nil { store.send(.toolDetailDismissed) } }
-    )
   }
 
   /// The transcript, rendered behind the shared renderer boundary (`SwiftUITranscriptView`).
