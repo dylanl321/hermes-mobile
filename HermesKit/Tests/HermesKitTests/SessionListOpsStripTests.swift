@@ -47,6 +47,61 @@ struct SessionListOpsStripTests {
     #expect(store.state.serverStatus?.worstPressure == "elevated")
   }
 
+  @Test func startGatewayFromStripWhenStopped() async {
+    let store = TestStore(
+      initialState: SessionListFeature.State(
+        connection: connection,
+        serverStatus: ServerStatus(version: "0.20.5", gatewayRunning: false, gatewayState: "stopped"),
+        gatewaySupported: true
+      )
+    ) {
+      SessionListFeature()
+    } withDependencies: {
+      $0.continuousClock = ImmediateClock()
+      $0.hermesREST.gatewayLifecycle = { @Sendable _, action in
+        #expect(action == .start)
+        return DashboardActionAccepted(ok: true, name: "gateway-start")
+      }
+      $0.hermesREST.status = { @Sendable _ in
+        ServerStatus(version: "0.20.5", gatewayRunning: true, gatewayState: "running")
+      }
+    }
+
+    #expect(store.state.showStartGatewayOnStrip)
+    await store.send(.startGatewayFromStripTapped) {
+      $0.isStartingGatewayFromStrip = true
+    }
+    await store.receive(\.gatewayStartFromStripFinished.success) {
+      $0.isStartingGatewayFromStrip = false
+      $0.serverStatus = ServerStatus(
+        version: "0.20.5", gatewayRunning: true, gatewayState: "running"
+      )
+    }
+    #expect(!store.state.showStartGatewayOnStrip)
+  }
+
+  @Test func opsStripTappedOpensSystem() async {
+    let store = TestStore(
+      initialState: SessionListFeature.State(
+        connection: connection,
+        serverStatus: ServerStatus(version: "0.20.5", gatewayState: "stopped"),
+        systemSupported: true,
+        gatewaySupported: true
+      )
+    ) {
+      SessionListFeature()
+    }
+
+    await store.send(.opsStripTapped) {
+      $0.system = SystemFeature.State(
+        connection: self.connection,
+        systemSupported: true,
+        gatewaySupported: true,
+        serverStatus: ServerStatus(version: "0.20.5", gatewayState: "stopped")
+      )
+    }
+  }
+
   @Test func analyticsNotFoundFlipsSupportSilently() async {
     let store = TestStore(initialState: SessionListFeature.State(connection: connection)) {
       SessionListFeature()

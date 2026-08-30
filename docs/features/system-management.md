@@ -15,11 +15,13 @@ Architecture: authenticated dashboard REST only — **not** the push plugin/gate
 - **Operations** — doctor, security-audit, backup, prompt-size, dump, config-migrate
   via `POST /api/ops/*` + `actionStatus` poll
 - **Banners** — unclean boot / suspected OOM from enriched `/api/status` when present
+- **Home ops strip** — stopped gateway shows “Gateway stopped” + **Start**; tap opens System
 
 ## Entry
 
 Settings → **System** and More → **System** (list-hosted sheet, same pattern as Skills).
 Optimistic `systemSupported`; first `/api/system/stats` 404/405 hides the entry.
+Home ops strip also opens System when tapped (and offers Start while the gateway is down).
 
 ## Invariants
 

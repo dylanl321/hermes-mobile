@@ -98,6 +98,10 @@ Enriched `GET /api/status` (gateway + memory/disk pressure) and
 `GET /api/analytics/usage?days=`. Compact strip under the Sessions header.
 Analytics 404 → hide usage only.
 
+When the messaging gateway is **stopped**, the strip shows “Gateway stopped” in
+warning style with an inline **Start** (if gateway lifecycle is supported). Tapping
+the strip opens **System** when that surface is available.
+
 ## System / Host / Update
 
 Host stats, Hermes self-update (check / apply / receipt), gateway lifecycle, and

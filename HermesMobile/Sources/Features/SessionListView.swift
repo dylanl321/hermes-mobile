@@ -200,6 +200,7 @@ struct SessionListView: View {
   }
 
   /// Compact gateway health + usage summary above the session rows.
+  /// Stopped gateways get a warning tint and an inline Start; the strip itself opens System.
   private var opsStrip: some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 8) {
@@ -208,10 +209,10 @@ struct SessionListView: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
         }
-        if let state = store.serverStatus?.gatewayState {
-          Text(state.capitalized)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        if let status = store.serverStatus {
+          Text(status.gatewayStateDisplayLabel)
+            .font(.caption.weight(status.isGatewayStopped ? .semibold : .regular))
+            .foregroundStyle(status.isGatewayStopped ? Color.orange : Color.secondary)
         }
         if let pressure = store.serverStatus?.worstPressure {
           Text(pressure.capitalized)
@@ -222,7 +223,30 @@ struct SessionListView: View {
             .foregroundStyle(.white)
             .accessibilityLabel("\(pressure) resource pressure")
         }
-        Spacer()
+        Spacer(minLength: 0)
+        if store.showStartGatewayOnStrip {
+          if store.isStartingGatewayFromStrip {
+            ProgressView()
+              .controlSize(.mini)
+          } else {
+            Button("Start") {
+              store.send(.startGatewayFromStripTapped)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          }
+        } else if store.systemSupported {
+          Image(systemName: "chevron.right")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+        }
+      }
+      if let boot = store.serverStatus?.bootWarning {
+        Text(boot)
+          .font(.caption2)
+          .foregroundStyle(.orange)
+          .lineLimit(2)
       }
       if store.analyticsSupported, let analytics = store.usageAnalytics {
         Text(analytics.summaryLabel)
@@ -232,6 +256,12 @@ struct SessionListView: View {
       }
     }
     .padding(.vertical, 4)
+    .contentShape(Rectangle())
+    .onTapGesture {
+      store.send(.opsStripTapped)
+    }
+    .accessibilityAddTraits(store.systemSupported ? .isButton : [])
+    .accessibilityHint(store.systemSupported ? "Opens System" : "")
     .listRowSeparator(.hidden)
     .listRowBackground(Color.clear)
     .accessibilityElement(children: .combine)

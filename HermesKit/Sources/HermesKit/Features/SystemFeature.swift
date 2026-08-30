@@ -85,10 +85,7 @@ public struct SystemFeature {
     }
 
     public var gatewayStateLabel: String {
-      if let state = serverStatus?.gatewayState, !state.isEmpty { return state }
-      if serverStatus?.gatewayRunning == true { return "running" }
-      if serverStatus?.gatewayRunning == false { return "stopped" }
-      return "unknown"
+      serverStatus?.gatewayStateDisplayLabel ?? "unknown"
     }
   }
 

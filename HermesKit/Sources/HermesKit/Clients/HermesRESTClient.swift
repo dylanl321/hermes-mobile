@@ -103,6 +103,25 @@ public struct ServerStatus: Equatable, Sendable, Decodable {
 
   /// Gateway boot identity for dismissible banners (changes each restart).
   public var bootId: String? { memory?.bootId }
+
+  /// Messaging gateway is down (explicit `gateway_running` or stopped-like `gateway_state`).
+  public var isGatewayStopped: Bool {
+    if gatewayRunning == false { return true }
+    switch gatewayState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "stopped", "stop", "offline", "down", "exited": true
+    default: false
+    }
+  }
+
+  /// Human label for the home ops strip / System gateway row.
+  public var gatewayStateDisplayLabel: String {
+    if isGatewayStopped { return "Gateway stopped" }
+    if let state = gatewayState?.trimmingCharacters(in: .whitespacesAndNewlines), !state.isEmpty {
+      return state.prefix(1).uppercased() + state.dropFirst().lowercased()
+    }
+    if gatewayRunning == true { return "Running" }
+    return "Unknown"
+  }
 }
 
 public enum RESTError: Error, Equatable, Sendable {
