@@ -99,8 +99,28 @@ public struct ModelOptions: Equatable, Sendable, Decodable {
     return true
   }
 
-  /// Valid reasoning-effort levels (verified: `hermes_constants.VALID_REASONING_EFFORTS`
-  /// plus "none"). Sent via `config.set {key:"reasoning", value}`. The server accepts any
-  /// level regardless of model; they only take effect on reasoning-capable models.
-  public static let reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+  /// Valid reasoning-effort levels: `hermes_constants.VALID_REASONING_EFFORTS` verbatim,
+  /// with "none" first (`parse_reasoning_effort` accepts it too). `max`/`ultra` were added
+  /// upstream on 2026-07-12 (#62650). Sent via `config.set {key:"reasoning", value}`.
+  ///
+  /// The client offers the FULL scale on every model and never filters by model: the
+  /// transports clamp per provider on the wire (gpt-5.6 maps `ultra`→`max`, xAI tops out
+  /// at `high`, OpenAI-compatible tops out at `max`), and `hermes_cli/inventory.py`
+  /// `_apply_capabilities` deliberately does not forward per-model `supported_efforts`
+  /// (it under-reports), so there is no server-published list to filter against.
+  public static let reasoningEfforts = [
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+  ]
+
+  /// Levels a pre-#62650 gateway rejects with server error 4002
+  /// ("unknown reasoning value: <v>"); one such verdict latches them out of the picker
+  /// for that chat slot. See `GatewayError.isUnknownReasoningValue`.
+  public static let extendedReasoningEfforts: Set<String> = ["max", "ultra"]
+
+  /// The levels the picker should offer: the full ladder, or — once an agent has rejected
+  /// an extended level — the ladder minus `max`/`ultra`. Order is preserved either way.
+  public static func offeredEfforts(extendedSupported: Bool) -> [String] {
+    guard !extendedSupported else { return reasoningEfforts }
+    return reasoningEfforts.filter { !extendedReasoningEfforts.contains($0) }
+  }
 }

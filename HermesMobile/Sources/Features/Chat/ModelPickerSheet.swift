@@ -5,11 +5,20 @@ import SwiftUI
 /// are selectable; unconfigured providers appear disabled with a "how to configure" hint
 /// (they can't be set up from mobile). The reasoning-effort options drop down inline under
 /// the selected model when that model supports reasoning. Applies via `config.set`.
+///
+/// The effort rows show the FULL upstream scale (`none … xhigh, max, ultra`) on every
+/// reasoning-capable model — the server clamps per provider on the wire. The exception is
+/// the per-slot latch: once an older gateway has rejected an extended level,
+/// `extendedReasoningSupported` goes false and `max`/`ultra` drop out of the list. The
+/// filter itself lives in `ModelOptions.offeredEfforts(extendedSupported:)`.
 struct ModelPickerSheet: View {
   let picker: ChatFeature.State.ModelPicker
   let currentModel: String?
   let currentEffort: String?
   let isBusy: Bool
+  /// `ChatFeature.State.extendedReasoningSupported`: false hides `max`/`ultra` after this
+  /// slot's agent rejected one. Defaulted so the snapshot call sites stay unchanged.
+  var extendedReasoningSupported: Bool = true
   let onSelectModel: (String) -> Void
   let onSelectEffort: (String) -> Void
   let onDone: () -> Void
@@ -24,6 +33,13 @@ struct ModelPickerSheet: View {
                                  description: Text(error))
         } else {
           List {
+            // An apply failure keeps the list usable — the rolled-back row is right below.
+            if let applyError = picker.applyError {
+              Section {
+                Label(applyError, systemImage: "exclamationmark.triangle")
+                  .font(.footnote).foregroundStyle(.red)
+              }
+            }
             if isBusy {
               Section {
                 Label("Finish or stop the current turn to switch models.", systemImage: "hourglass")
@@ -58,7 +74,8 @@ struct ModelPickerSheet: View {
       selectableRow(model, selected: model == currentModel) { onSelectModel(model) }
       // Reasoning effort drops down under the selected, reasoning-capable model.
       if model == currentModel, picker.options?.supportsReasoning(model) ?? true {
-        ForEach(ModelOptions.reasoningEfforts, id: \.self) { effort in
+        ForEach(ModelOptions.offeredEfforts(extendedSupported: extendedReasoningSupported),
+                id: \.self) { effort in
           effortRow(effort, selected: effort == currentEffort) { onSelectEffort(effort) }
         }
       }

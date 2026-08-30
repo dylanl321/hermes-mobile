@@ -339,6 +339,36 @@ func asRESTError(_ error: any Error) -> RESTError {
   error as? RESTError ?? RESTError(transport: error)
 }
 
+/// Caps how long a launch/retry `sessions` probe may hang before the UI treats the server as
+/// unreachable. `URLSession`'s default request timeout is 60s — long enough to strand the
+/// user on "Connecting…" when DNS or a private network (Tailscale/VPN off) never answers.
+/// Offline codes (`URLError.notConnectedToInternet` and friends) still fail immediately and
+/// win the race; this bound only cuts off a probe that would otherwise sit until the session
+/// timeout.
+let connectionProbeTimeout: Duration = .seconds(15)
+
+/// Run the same `GET /api/sessions?limit=1` shape launch auto-connect and the retry screen
+/// use, racing it against `connectionProbeTimeout` so a hanging transport can't leave the
+/// connecting spinner (or a latched Retry) up for a full minute.
+func probeSessions(
+  _ rest: HermesRESTClient,
+  connection: ServerConnection,
+  clock: some Clock<Duration>,
+  timeout: Duration = connectionProbeTimeout
+) async throws -> [Session] {
+  try await withThrowingTaskGroup(of: [Session].self) { group in
+    group.addTask {
+      try await rest.sessions(connection, 1, 0, .recent)
+    }
+    group.addTask {
+      try await clock.sleep(for: timeout)
+      throw RESTError.unreachable
+    }
+    defer { group.cancelAll() }
+    return try await group.next()!
+  }
+}
+
 /// Lenient URL parsing: accept `host:port` by defaulting to `http://`.
 func parseServerURL(_ string: String) -> URL? {
   let trimmed = string.trimmingCharacters(in: .whitespaces)

@@ -31,8 +31,9 @@ from your desk and still keep your agent moving.
   re-auth prompt gets you back in without losing your place. And if the agent simply
   isn't reachable at launch — VPN/Tailscale off, no internet, agent down — you get a
   retry screen naming the server instead of a sign-in form (it retries by itself when
-  you foreground the app, right after you flip the VPN on); only a real rejection sends
-  you back to sign-in.
+  you foreground the app, right after you flip the VPN on, and times out quickly instead
+  of spinning forever); **Edit connection** lets you fix the URL without logging out;
+  only a real rejection — or an explicit Log Out — sends you back to sign-in.
 - **Find any session.** Browse sessions grouped by workspace, search across all of
   them, pin the ones you care about, rename or archive them — or permanently delete
   the ones you're done with, from the main list or the archived view (a Settings

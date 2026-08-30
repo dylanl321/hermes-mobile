@@ -3318,6 +3318,70 @@ struct AppFeatureTests {
     }
   }
 
+  /// "Edit connection" is the non-destructive escape hatch: same prefilled onboarding as a
+  /// credentials rejection, Keychain session + server URL left intact (unlike Log Out).
+  @Test func editConnectionFallsBackToPrefilledOnboardingWithoutClearingSession() async {
+    let sessionDeleted = LockIsolated(false)
+    let preferences = PreferencesClient.inMemory()
+    preferences.saveServerURL("http://mac.tailnet:9119")
+    preferences.savePinnedIDs(["s-pinned"])
+    let store = TestStore(
+      initialState: AppFeature.State(
+        connectionFailed: ConnectionFailedFeature.State(
+          connection: cookieConnection, reason: .unreachable
+        )
+      )
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.preferences = preferences
+      $0.keychain.deleteSession = { @Sendable in sessionDeleted.setValue(true) }
+    }
+
+    await store.send(
+      .connectionFailed(.delegate(.editConnectionRequested(cookieConnection)))
+    ) {
+      $0.connectionFailed = nil
+      // Cookie mode: URL only — the password was never persisted.
+      $0.onboarding = ConnectionFeature.State(serverURL: "http://mac.tailnet:9119")
+    }
+    #expect(!sessionDeleted.value)
+    #expect(preferences.loadServerURL() == "http://mac.tailnet:9119")
+    #expect(preferences.loadPinnedIDs() == ["s-pinned"])
+  }
+
+  /// A launch probe that hangs past `connectionProbeTimeout` must leave "Connecting…" and
+  /// raise the retry screen as `.unreachable` — not sit on the spinner for URLSession's
+  /// full 60s default (the "off network / Tailscale down" hang).
+  @Test func autoConnectProbeTimeoutRaisesRetryScreen() async {
+    let clock = TestClock()
+    let (stall, releaseStall) = AsyncStream<Void>.makeStream()
+    let store = TestStore(initialState: AppFeature.State()) {
+      AppFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.keychain.loadSession = { @Sendable _ in .token("tok") }
+      $0.preferences.loadServerURL = { "http://mac.tailnet:9119" }
+      $0.hermesREST.sessions = { @Sendable _, _, _, _ in
+        for await _ in stall { break }
+        return []
+      }
+    }
+
+    await store.send(.task) {
+      $0.didRunLaunchProbe = true
+      $0.autoConnecting = true
+    }
+    await clock.advance(by: connectionProbeTimeout)
+    await store.receive(\.autoConnectFailed) {
+      $0.autoConnecting = false
+      $0.connectionFailed = ConnectionFailedFeature.State(
+        connection: self.connection, reason: .unreachable
+      )
+    }
+    releaseStall.finish()
+  }
+
   /// "Log Out" from the retry screen runs the logout recipe — keychain session, server URL,
   /// identity-scoped prefs, grouping mode, badge, push registration — and lands on a FRESH
   /// (nothing prefilled) onboarding.

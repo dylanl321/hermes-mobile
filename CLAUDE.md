@@ -89,7 +89,11 @@ bullets below are the compressed rules.
   screen, never onboarding (#62)**: only 401/403 falls back to prefilled onboarding;
   everything else (incl. `RESTError.offline`) populates `connectionFailed`.
   `ConnectionFailedFeature.isRetryable` is the ONE routing rule. Launch path only;
-  a foreground re-probe supersedes an in-flight one.
+  a foreground re-probe supersedes an in-flight one. The launch/retry `sessions` probe
+  is bounded by `connectionProbeTimeout` (15s) so a hanging DNS/private-network miss
+  can't leave the "Connecting…" spinner up for URLSession's 60s default. **Edit
+  connection** lands on the same prefilled onboarding as a credentials verdict without
+  wiping Keychain/prefs; **Log Out** remains the destructive wipe.
 
 ## Transcript & chat UI
 
@@ -157,6 +161,11 @@ bullets below are the compressed rules.
   turn. Everything funnels through `submitDraft` + `drainQueueIfReady`; Stop and turn
   `.error` park the queue; a failed drain re-parks at head (never silently lost, never
   shown twice); queue is in-memory only. Details: `docs/features/prompt-queue.md`.
+- **The `model · effort` chip is the only picker (#81)** — `config.set` inside the #17 heal,
+  optimistic then reconciled by `session.info`. Offer the FULL reasoning ladder always (the
+  server clamps per provider and publishes no per-model list); a failure rolls back BOTH keys
+  + banners, and only the 4002 `unknown reasoning value` verdict latches the per-slot,
+  unpersisted `extendedReasoningSupported`. Details: `docs/features/model-picker.md`.
 
 ## Session list
 

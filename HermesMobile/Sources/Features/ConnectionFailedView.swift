@@ -4,8 +4,9 @@ import SwiftUI
 
 /// Shown instead of onboarding when **launch auto-connect** fails for a reason unrelated to
 /// the stored credentials. They're still good, so the screen never asks for them again — it
-/// names the server it couldn't reach, says why, and offers a Retry. **Log Out** — behind a
-/// confirmation — abandons the session via the logout recipe in `AppFeature`.
+/// names the server it couldn't reach, says why, and offers a Retry. **Edit connection**
+/// lands on prefilled onboarding so the URL/token can be fixed without wiping the session;
+/// **Log Out** — behind a confirmation — abandons it via the logout recipe in `AppFeature`.
 ///
 /// It also carries a tertiary link to `AgentSetupGuideView`, the app's single connection-help
 /// surface: launch transport failures no longer pass through onboarding at all, and this
@@ -109,10 +110,22 @@ struct ConnectionFailedView: View {
         .disabled(store.isRetrying)
         .accessibilityLabel(store.isRetrying ? "Retrying" : "Retry")
 
+        // Non-destructive alternative to Log Out: edit the URL / credentials without wiping
+        // pins and cached chats. Deliberately NOT disabled while retrying — same rationale
+        // as the help link and Log Out below.
+        Button {
+          store.send(.editConnectionTapped)
+        } label: {
+          Text("Edit connection")
+            .frame(maxWidth: .infinity, minHeight: Self.buttonLabelMinHeight)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+
         // Tertiary, above the destructive one: the failures this screen reports are the
         // ones the guide answers (host-header 400, a moved route's 404, a reply that
         // doesn't look like Hermes). Deliberately NOT disabled while retrying — a probe can
-        // run up to URLSession's 60s default, and the foreground auto-retry arms it without
+        // run up to `connectionProbeTimeout`, and the foreground auto-retry arms it without
         // the user asking, so the ways off this screen must never be greyed out by it.
         Button("Need help setting up your agent?") {
           showsSetupGuide = true

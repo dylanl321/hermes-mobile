@@ -36,10 +36,13 @@ AppFeature                 // root nav + launch auto-connect; onboarding until c
 │                          //   raised when the launch probe fails for a reason that isn't a
 │                          //   verdict on the credentials — i.e. EVERYTHING except 401/403
 │                          //   (see ConnectionFailedFeature.isRetryable) — keeping the
-│                          //   stored session; manual Retry + foreground auto-retry (the
-│                          //   foreground supersedes an in-flight probe rather than being
-│                          //   swallowed); delegates connected / credentialsRejected /
-│                          //   logoutConfirmed (the logout clearing lives in AppFeature)
+│                          //   stored session; probe bounded by connectionProbeTimeout (15s);
+│                          //   manual Retry + foreground auto-retry (the foreground
+│                          //   supersedes an in-flight probe rather than being swallowed);
+│                          //   Edit connection → prefilled onboarding without wiping;
+│                          //   delegates connected / credentialsRejected /
+│                          //   editConnectionRequested / logoutConfirmed (logout clearing
+│                          //   lives in AppFeature)
 ├─ ReauthFeature           // re-auth modal: fixed URL, prefilled identity, password/token field;
 │                          //   same-user resume vs different-user switch vs Quit→onboarding
 ├─ SessionListFeature      // flat list, grouped by workspace OR chronological (persisted) /
@@ -179,11 +182,16 @@ prefilled-onboarding fallback; everything else raises `ConnectionFailedFeature` 
 `AuthSession` untouched.** A stored connection was a working Hermes agent when onboarding
 persisted it, so a launch failure that isn't 401/403 — a proxy's `502`/`503`/`504`, the agent's
 own `500`, a vanished route's `404`, a `429`, a captive portal's HTML (`.decoding`) — means the
-network or the server changed, not the saved sign-in. The screen offers Retry, a foreground
-auto-retry (`.sceneBecameActive`, which SUPERSEDES an in-flight probe rather than being
-swallowed by `isRetrying` — a probe whose result never lands would latch the spinner), the
-`AgentSetupGuideView` help sheet (a tertiary link, view-local `@State` as on the login screen)
-and a confirmed Log Out (the clearing itself lives in `AppFeature`). Its reason line splits a
+network or the server changed, not the saved sign-in. The launch/retry `sessions` probe is
+bounded by `connectionProbeTimeout` (15s) so a hanging DNS or private-network miss can't leave
+the "Connecting…" spinner up for `URLSession`'s 60s default — offline `URLError` codes still
+fail immediately and win the race. The screen offers Retry, a foreground auto-retry
+(`.sceneBecameActive`, which SUPERSEDES an in-flight probe rather than being swallowed by
+`isRetrying` — a probe whose result never lands would latch the spinner), **Edit connection**
+(non-destructive — same prefilled onboarding as a credentials verdict, Keychain/prefs intact),
+the `AgentSetupGuideView` help sheet (a tertiary link, view-local `@State` as on the login
+screen) and a confirmed Log Out (the clearing itself lives in `AppFeature`). Its reason line
+splits a
 `.server` status three ways — a 5xx (`500..<600`) and the transient refusals 408/425/429 may
 clear on their own, every *other* 4xx repeats identically and so surfaces the server's own
 `detail` (sanitized: markup dropped, first line, ~200 chars, since `serverDetail(from:)` falls

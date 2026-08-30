@@ -199,6 +199,7 @@ public struct AppFeature {
   @Dependency(\.push) var push
   @Dependency(\.backgroundTask) var backgroundTask
   @Dependency(\.chatSnapshot) var chatSnapshot
+  @Dependency(\.continuousClock) var clock
 
   public init() {}
 
@@ -237,10 +238,14 @@ public struct AppFeature {
         let connection = ServerConnection(baseURL: credentials.url, auth: credentials.session)
         return .merge(
           tapObserver,
-          .run { [rest] send in
+          .run { [rest, clock] send in
             do {
-              _ = try await rest.sessions(connection, 1, 0, .recent)
+              // Bound the probe: a hanging DNS / private-network miss must not leave the
+              // "Connecting…" spinner up for URLSession's full 60s default (#62 UX).
+              _ = try await probeSessions(rest, connection: connection, clock: clock)
               await send(.autoConnectSucceeded(connection))
+            } catch is CancellationError {
+              // Effect cancelled (process teardown) — don't invent a failure screen.
             } catch {
               await send(.autoConnectFailed(connection, asRESTError(error)))
             }
@@ -282,6 +287,15 @@ public struct AppFeature {
         // The retry reached the server and it turned us away — retrying can't fix that, so
         // land exactly where a launch auth failure lands: prefilled onboarding, nothing
         // cleared, which is also where the connection-help sheet's entry points live.
+        state.connectionFailed = nil
+        fallBackToOnboarding(&state, connection: connection)
+        return .none
+
+      case let .connectionFailed(.delegate(.editConnectionRequested(connection))):
+        // Non-destructive escape hatch: the URL (or token) is wrong / the agent moved, and
+        // Retry can never succeed — but wiping the session via Log Out is overkill. Land on
+        // the same prefilled onboarding credentials-rejected uses; Keychain + prefs stay
+        // intact until the user successfully connects (or explicitly logs out from there).
         state.connectionFailed = nil
         fallBackToOnboarding(&state, connection: connection)
         return .none
@@ -917,8 +931,8 @@ public struct AppFeature {
   /// The prefilled-onboarding landing for a connection that needs *editing* rather than
   /// retrying: token mode prefills both fields so the user can fix them; cookie mode prefills
   /// only the URL (the password is never persisted), so they re-enter it. Shared by the launch
-  /// auth-failure fallback and the retry screen's `.credentialsRejected` delegate, so
-  /// onboarding is constructed in exactly one place.
+  /// auth-failure fallback and the retry screen's `.credentialsRejected` /
+  /// `.editConnectionRequested` delegates, so onboarding is constructed in exactly one place.
   private func fallBackToOnboarding(_ state: inout State, connection: ServerConnection) {
     state.onboarding = ConnectionFeature.State(
       serverURL: connection.baseURL.absoluteString,
