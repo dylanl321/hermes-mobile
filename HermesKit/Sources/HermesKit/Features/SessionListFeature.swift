@@ -748,8 +748,33 @@ public struct SessionListFeature {
 
   public var body: some ReducerOf<Self> {
     BindingReducer()
-    Reduce { state, action in
-      switch action {
+    Reduce(self.reduce)
+      .ifLet(\.$settings, action: \.settings) {
+        SettingsFeature()
+      }
+      .ifLet(\.$archived, action: \.archived) {
+        ArchivedSessionsFeature()
+      }
+      .ifLet(\.$workspaceBrowser, action: \.workspaceBrowser) {
+        WorkspaceBrowserFeature()
+      }
+      .ifLet(\.$skills, action: \.skills) {
+        SkillsFeature()
+      }
+      .ifLet(\.$system, action: \.system) {
+        SystemFeature()
+      }
+      .ifLet(\.$addProfile, action: \.addProfile) {
+        AddProfileFeature()
+      }
+      .ifLet(\.$confirmationDialog, action: \.confirmationDialog)
+  }
+
+  /// Core list reducer extracted so Release WMO can type-check `body`. An
+  /// inline `Reduce { … }` plus the presented `ifLet`s exceeded the compiler
+  /// budget after System was composed in (#8 IPA).
+  private func reduce(_ state: inout State, _ action: Action) -> Effect<Action> {
+    switch action {
       case .task:
         // Refresh "now", reload persisted prefs (incl. the device-local selected profile),
         // probe the profiles capability, and start the auto-poll loop.
@@ -1911,26 +1936,6 @@ public struct SessionListFeature {
       case .delegate:
         return .none
       }
-    }
-    .ifLet(\.$settings, action: \.settings) {
-      SettingsFeature()
-    }
-    .ifLet(\.$archived, action: \.archived) {
-      ArchivedSessionsFeature()
-    }
-    .ifLet(\.$workspaceBrowser, action: \.workspaceBrowser) {
-      WorkspaceBrowserFeature()
-    }
-    .ifLet(\.$skills, action: \.skills) {
-      SkillsFeature()
-    }
-    .ifLet(\.$system, action: \.system) {
-      SystemFeature()
-    }
-    .ifLet(\.$addProfile, action: \.addProfile) {
-      AddProfileFeature()
-    }
-    .ifLet(\.$confirmationDialog, action: \.confirmationDialog)
   }
 
   /// Refresh "now", clear errors, and reload the non-secret persisted prefs (seen counts,

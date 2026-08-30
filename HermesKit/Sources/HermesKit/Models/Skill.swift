@@ -159,8 +159,8 @@ public struct DashboardActionStatus: Equatable, Sendable, Decodable {
     if let exitCode { return true }
     if receiptExitCode != nil { return true }
     switch status?.lowercased() {
-    case "done", "completed", "success", "failed", "error", "cancelled": true
-    default: false
+    case "done", "completed", "success", "failed", "error", "cancelled": return true
+    default: return false
     }
   }
 
@@ -171,8 +171,8 @@ public struct DashboardActionStatus: Equatable, Sendable, Decodable {
     default: break
     }
     switch status?.lowercased() {
-    case "failed", "error": true
-    default: error?.isEmpty == false
+    case "failed", "error": return true
+    default: return error?.isEmpty == false
     }
   }
 
@@ -181,8 +181,8 @@ public struct DashboardActionStatus: Equatable, Sendable, Decodable {
     if isFailed { return false }
     if let code = exitCode ?? receiptExitCode { return code == 0 }
     switch (receiptOutcome ?? status)?.lowercased() {
-    case "done", "completed", "success", "ok": true
-    default: running == false && error == nil
+    case "done", "completed", "success", "ok": return true
+    default: return running == false && error == nil
     }
   }
 }

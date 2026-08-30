@@ -108,8 +108,8 @@ public struct ServerStatus: Equatable, Sendable, Decodable {
   public var isGatewayStopped: Bool {
     if gatewayRunning == false { return true }
     switch gatewayState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-    case "stopped", "stop", "offline", "down", "exited": true
-    default: false
+    case "stopped", "stop", "offline", "down", "exited": return true
+    default: return false
     }
   }
 
