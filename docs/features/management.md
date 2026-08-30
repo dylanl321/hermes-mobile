@@ -43,7 +43,9 @@ the Reveal button is hidden for that agent and overwrite remains available (some
 only allow reveal from the web SPA). Revealed plaintext lives only in ephemeral edit
 state — shown in a disabled `SecureField` (no copy), auto-clears after ~30s or on dismiss;
 429 surfaces a rate-limit banner. Never log reveal values or full `/api/env` bodies.
-Writes apply to new sessions; a running CLI may need `/reload`.
+Writes apply to new sessions; a running process may need a gateway restart (planned
+System “Restart gateway to apply” offer after save — see
+[`system-management.md`](system-management.md)). CLI `/reload` remains host-side only.
 
 ## Workspaces (More / Settings → Workspaces)
 

@@ -9,6 +9,9 @@ Architecture: authenticated dashboard REST only — **not** the push plugin/gate
 - **Host** — `GET /api/system/stats` (OS, versions, CPU/memory/disk, uptime)
 - **Hermes update** — check / apply / receipt (`/api/hermes/update/*`); git Apply only
 - **Gateway** — `POST /api/gateway/start|stop|restart` with confirmations
+- **Apply config / env writes** — after Settings config quick-edits or API Key
+  set/delete, offer the same gateway restart (Hermes applies many file-level edits
+  only on next session or restart). In-session chat `config.set` stays immediate.
 - **Operations** — doctor, security-audit, backup, prompt-size, dump, config-migrate
   via `POST /api/ops/*` + `actionStatus` poll
 - **Banners** — unclean boot / suspected OOM from enriched `/api/status` when present
@@ -21,8 +24,9 @@ Architecture: authenticated dashboard REST only — **not** the push plugin/gate
   null `exit_code` on a wiped in-memory action registry.
 - Non-updatable installs (Docker/Nix/package): show out-of-band command; never POST apply.
 - Confirm Update / Stop / Restart / config-migrate via `ConfirmationDialogState` +
-  `.bottomActionSheet`.
+  `.bottomActionSheet`. Never auto-restart after a config/env write — always confirm.
 - One background ops/update action at a time; surface tailed log lines in-ui.
+- No invented REST `/reload`; CLI `/reload` is not auto-submitted as chat.
 - Push notify path unchanged (generic body; no remote commands over APNs).
 
 ## Out of scope here

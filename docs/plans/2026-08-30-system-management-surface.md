@@ -49,6 +49,8 @@ UI shows copyable command, no Apply button.
 | Profile scoping | Host/update/ops are install-wide — **no** `?profile=` (unlike skills/env) |
 | Action poll | Extend `DashboardActionStatus` for `running` / `exit_code` / `lines` / receipt summary; shared poll helper extracted from Skills |
 | Reconnect during update | Expect socket/REST blip; surface “Updating… reconnecting” then re-check receipt + `GET /api/status` version |
+| Config / env apply | After successful `PUT /api/config` or `PUT`/`DELETE /api/env`, offer **Restart gateway to apply** when `gatewaySupported` (same `POST /api/gateway/restart` as System). Decline keeps the written file; new sessions may still pick some values up. |
+| Soft `/reload` | No first-party REST `.env` reload today (CLI slash only). Do **not** invent one; do not auto-submit `/reload` as chat text. Env edits use the restart offer. In-session `config.set` (model/reasoning) stays immediate and does **not** prompt restart. |
 
 ## Architecture
 
@@ -138,16 +140,35 @@ Mirror Skills: parent sets `skillsSupported` from prior probe — Settings alrea
 
 Snapshots: pin explicit height for any scrollable System form subsection under test; `dynamicTypeSize(.large)`.
 
-### Phase S3 — Gateway lifecycle + status banners
+### Phase S3 — Gateway lifecycle + status banners + post-edit restart
 
 | Control | API | UI |
 |---------|-----|-----|
 | Start / Stop / Restart | `POST /api/gateway/{action}` | Buttons + confirm for Stop/Restart; disable while action in flight |
 | Live state | Existing `ServerStatus.gatewayState` + refresh | Label in Gateway section |
+| Restart after config/env write | Same `restart` | Settings / Env success path → confirmation (“Restart gateway to apply these changes?”) → shared restart effect |
 
-After restart: expect brief disconnect; refresh status when reachable again (reuse connection health, do not invent SSH).
+Hermes documents that dashboard **config.yaml** edits take effect on the next agent
+session **or gateway restart**; messaging-channel credential flips likewise need a
+restart. Mobile already writes via `putConfig` / `putEnv` / `deleteEnv` — S3 wires the
+missing apply step:
+
+1. Extract a small shared restart effect (or `AppFeature` / parent delegate) callable
+   from `SystemFeature` **and** `SettingsFeature` / `EnvFeature` so System’s Restart
+   button and the post-edit prompt share one code path + confirm copy.
+2. On successful config quick-edit save or env set/delete: if `gatewaySupported`,
+   present the restart confirmation (not auto-restart). Cancel dismisses; files stay
+   written. If gateway routes 404, show a short footnote only (“Restart the agent
+   host for some changes to apply”) — no dead button.
+3. While restart runs: disable composer-adjacent confusion via existing disconnect
+   handling; refresh `ServerStatus` when reachable again.
+
+After restart: expect brief disconnect; refresh status when reachable again (reuse
+connection health, do not invent SSH).
 
 Ops strip / System: if `last_boot_suspected_oom` / unclean boot present, show dismissible banner (session-scoped `@State` or reducer token; boot_id keyed so escalation re-shows — match desktop severity order lightly: critical disk/mem > OOM > elevated).
+
+**Not in S3:** raw YAML editor, auto-restart without confirm, chat `config.set` prompts.
 
 ### Phase S4 — Operations actions
 
@@ -210,7 +231,7 @@ Still **out of scope** (carry forward from management plan): SSH/SFTP, Scarf fle
 |-------|--------|
 | S1 | Decode fixtures (stats, check, receipt, enriched status); path/method assertions; lenient unknown fields; Skills `DashboardActionStatus` still decodes old fixtures |
 | S2 | TestStore: load, 404 gates, apply confirm → poll → receipt success after simulated blip; non-updatable copy path; snapshot Host + Update |
-| S3 | Gateway confirm + in-flight lock; OOM banner boot_id dismiss; snapshot Gateway |
+| S3 | Gateway confirm + in-flight lock; post-config/env restart offer + cancel leaves files written; OOM banner boot_id dismiss; snapshot Gateway |
 | S4 | Ops action poll terminal success/fail; single-flight mutual exclusion; snapshot Operations |
 | S6* | Per-surface decode + gate + reducer tests (own PRs) |
 
@@ -221,7 +242,7 @@ Every phase: `script -q /dev/null swift test --package-path HermesKit` (or `make
 1. S0 — this plan (+ feature doc stub) — **this PR**
 2. S1 — models + REST (can land without UI)
 3. S2 — SystemFeature Host + Update (first user-visible)
-4. S3 — Gateway + banners
+4. S3 — Gateway + post-config/env restart offer + banners
 5. S4 — Operations
 6. S5 — docs finalize / move plan to completed
 7. S6a–g — separate focused PRs
@@ -233,6 +254,7 @@ Every phase: `script -q /dev/null swift test --package-path HermesKit` (or `make
 - Update check: behind count or up-to-date; Apply on git install completes with success **after** dashboard restart blip (receipt path)
 - Non-git install: copyable command, no Apply
 - Gateway Restart confirms and returns to Running
+- Config quick-edit or API Key save offers Restart gateway; confirming applies; declining leaves the write in place
 - Doctor runs and shows log lines
 - Older agent without `/api/system/stats`: System hidden; chat + existing management still work
 - Push register / taps unchanged
