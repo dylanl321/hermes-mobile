@@ -384,8 +384,8 @@ public struct HermesUpdateReceipt: Equatable, Sendable, Decodable {
     let code = exitCode ?? summaryExitCode
     if code == 0 { return true }
     switch (outcome ?? summaryOutcome)?.lowercased() {
-    case "success", "ok", "completed": true
-    default: false
+    case "success", "ok", "completed": return true
+    default: return false
     }
   }
 
@@ -394,8 +394,8 @@ public struct HermesUpdateReceipt: Equatable, Sendable, Decodable {
     let code = exitCode ?? summaryExitCode
     if let code, code != 0 { return true }
     switch (outcome ?? summaryOutcome)?.lowercased() {
-    case "failed", "error", "partial": true
-    default: false
+    case "failed", "error", "partial": return true
+    default: return false
     }
   }
 

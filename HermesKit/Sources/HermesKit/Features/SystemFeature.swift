@@ -212,18 +212,17 @@ public struct SystemFeature {
         guard state.updateCheck?.showsApplyButton == true, !state.hasInFlightAction else {
           return .none
         }
+        let behind = state.updateCheck?.behind
         state.confirmationDialog = ConfirmationDialogState {
           TextState("Update Hermes?")
         } actions: {
           ButtonState(action: .confirmApplyUpdate) { TextState("Update now") }
           ButtonState(role: .cancel) { TextState("Cancel") }
         } message: {
-          let behind = state.updateCheck?.behind
           if let behind, behind > 0 {
-            TextState("Pull \(behind) commit\(behind == 1 ? "" : "s") and restart services on the host.")
-          } else {
-            TextState("Run hermes update on the host. The dashboard may restart briefly.")
+            return TextState("Pull \(behind) commit\(behind == 1 ? "" : "s") and restart services on the host.")
           }
+          return TextState("Run hermes update on the host. The dashboard may restart briefly.")
         }
         return .none
 
