@@ -189,6 +189,8 @@ artifact URLs (they expire and need auth).
   snapshots, and TestFlight distribution.
 - [**Management surfaces**](docs/features/management.md) — dashboard skills, cron
   CRUD, config quick edits, multi-server, and home ops (when present).
+- [**System / Host / Update**](docs/features/system-management.md) — planned host
+  stats, Hermes self-update, gateway lifecycle, and ops (see plan).
 - [**Sideload install**](altstore/README.md) — AltStore / Feather unsigned IPA.
 
 ## Status

@@ -105,6 +105,10 @@ full `/api/env` bodies.
 MCP, webhooks, kanban, memory provider/reset, curator/logs, messaging/pairing,
 credential pool.
 
+**Follow-on:** System / Host / Hermes update / gateway / ops — see
+[`2026-08-30-system-management-surface.md`](2026-08-30-system-management-surface.md)
+(Phases S1–S4 first; former 6+ items become S6a–g there).
+
 ## Capability-gate strategy
 
 Reuse `RESTError.isMissingEndpointVerdict` (404 or 405). Flip `*Supported` silently.
