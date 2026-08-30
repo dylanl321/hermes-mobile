@@ -119,6 +119,11 @@ struct SessionListView: View {
         SkillsView(store: skillsStore)
       }
     }
+    .sheet(item: $store.scope(state: \.system, action: \.system)) { systemStore in
+      NavigationStack {
+        SystemView(store: systemStore)
+      }
+    }
     .sheet(item: $store.scope(state: \.addProfile, action: \.addProfile)) { addProfileStore in
       NavigationStack {
         AddProfileView(store: addProfileStore)
@@ -519,6 +524,14 @@ struct SessionListView: View {
       .pickerStyle(.inline)
 
       Divider()
+
+      if store.systemSupported {
+        Button {
+          store.send(.systemButtonTapped)
+        } label: {
+          Label("System", systemImage: "server.rack")
+        }
+      }
 
       if store.skillsSupported {
         Button {

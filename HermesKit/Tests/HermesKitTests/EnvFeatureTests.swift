@@ -109,6 +109,7 @@ struct EnvFeatureTests {
       $0.edit = nil
       $0.isLoading = true
     }
+    await store.receive(\.delegate.requestApplyRestart)
     await store.receive(\.envResponse.success) {
       $0.isLoading = false
       $0.entries = [
@@ -237,6 +238,7 @@ struct EnvFeatureTests {
       $0.edit = nil
       $0.isLoading = true
     }
+    await store.receive(\.delegate.requestApplyRestart)
     await store.receive(\.envResponse.success) {
       $0.isLoading = false
       $0.entries = [

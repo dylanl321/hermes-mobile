@@ -1028,5 +1028,61 @@ struct HermesRESTClientTests {
     #expect(status.memory?.pressure == "elevated")
     #expect(status.worstPressure == "elevated")
   }
+
+  @Test func systemStatsGetsHostEndpoint() async throws {
+    MockURLProtocol.set(json: #"{"os":"Linux","hermes_version":"0.20.0","hostname":"box"}"#)
+    let stats = try await makeClient().systemStats(connection)
+    #expect(stats.os == "Linux")
+    #expect(stats.hermesVersion == "0.20.0")
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "GET")
+    #expect(req.url?.path == "/api/system/stats")
+  }
+
+  @Test func hermesUpdateCheckForceQuery() async throws {
+    MockURLProtocol.set(json: #"{"behind":0,"can_apply":true,"update_available":false}"#)
+    _ = try await makeClient().hermesUpdateCheck(connection, true)
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.url?.path == "/api/hermes/update/check")
+    #expect(req.url?.query == "force=true")
+  }
+
+  @Test func hermesUpdatePosts() async throws {
+    MockURLProtocol.set(json: #"{"ok":true,"name":"hermes-update"}"#)
+    let accepted = try await makeClient().hermesUpdate(connection)
+    #expect(accepted.actionName == "hermes-update")
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "POST")
+    #expect(req.url?.path == "/api/hermes/update")
+  }
+
+  @Test func hermesUpdateReceiptGets() async throws {
+    MockURLProtocol.set(json: #"{"outcome":"success","exit_code":0}"#)
+    let receipt = try await makeClient().hermesUpdateReceipt(connection)
+    #expect(receipt.isSuccessful)
+    #expect(MockURLProtocol.lastRequest?.url?.path == "/api/hermes/update/receipt")
+  }
+
+  @Test func gatewayLifecyclePostsAction() async throws {
+    MockURLProtocol.set(json: #"{"ok":true,"name":"gateway-restart"}"#)
+    _ = try await makeClient().gatewayLifecycle(connection, .restart)
+    let req = try #require(MockURLProtocol.lastRequest)
+    #expect(req.httpMethod == "POST")
+    #expect(req.url?.path == "/api/gateway/restart")
+  }
+
+  @Test func opsActionPostsDoctor() async throws {
+    MockURLProtocol.set(json: #"{"ok":true,"name":"doctor"}"#)
+    _ = try await makeClient().opsAction(connection, .doctor)
+    #expect(MockURLProtocol.lastRequest?.url?.path == "/api/ops/doctor")
+  }
+
+  @Test func actionStatusOptionalLinesQuery() async throws {
+    MockURLProtocol.set(json: #"{"running":false,"exit_code":0,"lines":["a"]}"#)
+    let status = try await makeClient().actionStatus(connection, "doctor", 200)
+    #expect(status.lines == ["a"])
+    #expect(MockURLProtocol.lastRequest?.url?.path == "/api/actions/doctor/status")
+    #expect(MockURLProtocol.lastRequest?.url?.query == "lines=200")
+  }
 }
 } // extension RESTTransportSuite

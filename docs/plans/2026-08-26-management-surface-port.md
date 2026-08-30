@@ -105,9 +105,9 @@ full `/api/env` bodies.
 MCP, webhooks, kanban, memory provider/reset, curator/logs, messaging/pairing,
 credential pool.
 
-**Follow-on:** System / Host / Hermes update / gateway / ops — see
-[`2026-08-30-system-management-surface.md`](2026-08-30-system-management-surface.md)
-(Phases S1–S4 first; former 6+ items become S6a–g there).
+**Follow-on (shipped):** System / Host / Hermes update / gateway / ops — see
+[`completed/2026-08-30-system-management-surface.md`](completed/2026-08-30-system-management-surface.md)
+(Phases S1–S4). Remaining admin (S6a–g) still deferred.
 
 ## Capability-gate strategy
 

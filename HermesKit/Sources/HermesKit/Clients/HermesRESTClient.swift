@@ -89,6 +89,20 @@ public struct ServerStatus: Equatable, Sendable, Decodable {
     if levels.contains("elevated") { return "elevated" }
     return nil
   }
+
+  /// Prefer suspected OOM, then unclean boot — for System / ops-strip banners.
+  public var bootWarning: String? {
+    if memory?.lastBootSuspectedOom == true {
+      return "Your agent restarted unexpectedly, most likely because it ran out of memory."
+    }
+    if memory?.lastBootUnclean == true {
+      return "Your agent restarted unexpectedly after an unclean exit."
+    }
+    return nil
+  }
+
+  /// Gateway boot identity for dismissible banners (changes each restart).
+  public var bootId: String? { memory?.bootId }
 }
 
 public enum RESTError: Error, Equatable, Sendable {
@@ -271,7 +285,36 @@ public struct HermesRESTClient: Sendable {
     throw RESTError.notFound
   }
   /// Poll a background dashboard action — `GET /api/actions/{name}/status`.
-  public var actionStatus: @Sendable (_ connection: ServerConnection, _ name: String) async throws -> DashboardActionStatus = { _, _ in
+  /// Pass `lines` to request a tailed log (gateway/ops/update); `nil` omits the query
+  /// (Skills hub polls stay byte-identical to today).
+  public var actionStatus: @Sendable (_ connection: ServerConnection, _ name: String, _ lines: Int?) async throws -> DashboardActionStatus = { _, _, _ in
+    throw RESTError.notFound
+  }
+
+  // MARK: System / Host / Update
+
+  /// Host stats — `GET /api/system/stats`. Missing → `RESTError.notFound` for System gate.
+  public var systemStats: @Sendable (_ connection: ServerConnection) async throws -> SystemStats = { _ in
+    throw RESTError.notFound
+  }
+  /// Update availability — `GET /api/hermes/update/check` (`?force=true` when `force`).
+  public var hermesUpdateCheck: @Sendable (_ connection: ServerConnection, _ force: Bool) async throws -> HermesUpdateCheck = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Apply update — `POST /api/hermes/update` (background; poll `hermes-update`).
+  public var hermesUpdate: @Sendable (_ connection: ServerConnection) async throws -> DashboardActionAccepted = { _ in
+    throw RESTError.notFound
+  }
+  /// Durable update receipt — `GET /api/hermes/update/receipt`.
+  public var hermesUpdateReceipt: @Sendable (_ connection: ServerConnection) async throws -> HermesUpdateReceipt = { _ in
+    throw RESTError.notFound
+  }
+  /// Gateway lifecycle — `POST /api/gateway/{start|stop|restart}`.
+  public var gatewayLifecycle: @Sendable (_ connection: ServerConnection, _ action: GatewayLifecycleAction) async throws -> DashboardActionAccepted = { _, _ in
+    throw RESTError.notFound
+  }
+  /// Operations action — `POST /api/ops/{doctor|security-audit|…}`.
+  public var opsAction: @Sendable (_ connection: ServerConnection, _ action: OpsAction) async throws -> DashboardActionAccepted = { _, _ in
     throw RESTError.notFound
   }
 
@@ -572,10 +615,45 @@ public extension HermesRESTClient {
         )
         return response.actionName
       },
-      actionStatus: { conn, name in
+      actionStatus: { conn, name, lines in
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
-        let url = try makeURL(conn.baseURL, "/api/actions/\(encoded)/status")
+        var query: [URLQueryItem] = []
+        if let lines {
+          query.append(URLQueryItem(name: "lines", value: String(lines)))
+        }
+        let url = try makeURL(conn.baseURL, "/api/actions/\(encoded)/status", query: query)
         return try await get(url, token: conn.token, session: session)
+      },
+      systemStats: { conn in
+        let url = try makeURL(conn.baseURL, "/api/system/stats")
+        return try await get(url, token: conn.token, session: session)
+      },
+      hermesUpdateCheck: { conn, force in
+        let query = force ? [URLQueryItem(name: "force", value: "true")] : []
+        let url = try makeURL(conn.baseURL, "/api/hermes/update/check", query: query)
+        return try await get(url, token: conn.token, session: session)
+      },
+      hermesUpdate: { conn in
+        let url = try makeURL(conn.baseURL, "/api/hermes/update")
+        return try await postJSON(
+          url, body: Data("{}".utf8), token: conn.token, session: session
+        )
+      },
+      hermesUpdateReceipt: { conn in
+        let url = try makeURL(conn.baseURL, "/api/hermes/update/receipt")
+        return try await get(url, token: conn.token, session: session)
+      },
+      gatewayLifecycle: { conn, action in
+        let url = try makeURL(conn.baseURL, "/api/gateway/\(action.pathSegment)")
+        return try await postJSON(
+          url, body: Data("{}".utf8), token: conn.token, session: session
+        )
+      },
+      opsAction: { conn, action in
+        let url = try makeURL(conn.baseURL, "/api/ops/\(action.pathSegment)")
+        return try await postJSON(
+          url, body: Data("{}".utf8), token: conn.token, session: session
+        )
       },
       createCronJob: { conn, write, profile in
         let query = profile.map { [URLQueryItem(name: "profile", value: $0)] } ?? []

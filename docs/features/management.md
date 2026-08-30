@@ -98,13 +98,14 @@ Enriched `GET /api/status` (gateway + memory/disk pressure) and
 `GET /api/analytics/usage?days=`. Compact strip under the Sessions header.
 Analytics 404 → hide usage only.
 
-## System / Host / Update (planned)
+## System / Host / Update
 
 Host stats, Hermes self-update (check / apply / receipt), gateway lifecycle, and
 Operations actions (doctor, audit, backup, …). Authenticated dashboard REST only —
-not the push plugin. Normative plan:
-[`docs/plans/2026-08-30-system-management-surface.md`](../plans/2026-08-30-system-management-surface.md);
-invariants: [`system-management.md`](system-management.md).
+not the push plugin. Invariants: [`system-management.md`](system-management.md).
+
+Entry: Settings → **System**, More → **System**. After config quick-edit or API Key
+save/delete, offer confirmed gateway restart when supported.
 
 ## Privacy
 

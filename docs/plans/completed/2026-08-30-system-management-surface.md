@@ -93,7 +93,7 @@ Reuse:
 
 | Artifact | Location |
 |----------|----------|
-| This plan | `docs/plans/2026-08-30-system-management-surface.md` |
+| This plan | `docs/plans/completed/2026-08-30-system-management-surface.md` |
 | Feature doc | `docs/features/system-management.md` (invariants; expand as phases land) |
 | Pointer | Append System section to `docs/features/management.md`; CLAUDE “Management” bullet if present |
 

@@ -272,7 +272,7 @@ public struct SkillsFeature {
       for _ in 0..<60 {
         try await clock.sleep(for: .seconds(1))
         do {
-          let status = try await rest.actionStatus(conn, actionName)
+          let status = try await rest.actionStatus(conn, actionName, nil)
           await send(.hubActionPolled(status))
           if status.isTerminal || status.isFailed { return }
         } catch {

@@ -91,17 +91,41 @@ public struct ResourcePressure: Equatable, Sendable, Decodable {
   public var freeMb: Int?
   public var totalMb: Int?
   public var systemAvailableMb: Int?
+  public var systemTotalMb: Int?
+  public var gatewayRssMb: Int?
+  public var swapUsedMb: Int?
+  public var usedPercent: Double?
+  public var sampledAt: String?
+  public var bootId: String?
+  public var lastBootUnclean: Bool?
+  public var lastBootSuspectedOom: Bool?
 
   public init(
     pressure: String? = nil,
     freeMb: Int? = nil,
     totalMb: Int? = nil,
-    systemAvailableMb: Int? = nil
+    systemAvailableMb: Int? = nil,
+    systemTotalMb: Int? = nil,
+    gatewayRssMb: Int? = nil,
+    swapUsedMb: Int? = nil,
+    usedPercent: Double? = nil,
+    sampledAt: String? = nil,
+    bootId: String? = nil,
+    lastBootUnclean: Bool? = nil,
+    lastBootSuspectedOom: Bool? = nil
   ) {
     self.pressure = pressure
     self.freeMb = freeMb
     self.totalMb = totalMb
     self.systemAvailableMb = systemAvailableMb
+    self.systemTotalMb = systemTotalMb
+    self.gatewayRssMb = gatewayRssMb
+    self.swapUsedMb = swapUsedMb
+    self.usedPercent = usedPercent
+    self.sampledAt = sampledAt
+    self.bootId = bootId
+    self.lastBootUnclean = lastBootUnclean
+    self.lastBootSuspectedOom = lastBootSuspectedOom
   }
 
   public init(from decoder: Decoder) throws {
@@ -110,6 +134,14 @@ public struct ResourcePressure: Equatable, Sendable, Decodable {
     freeMb = try? c.decodeIfPresent(Int.self, forKey: .freeMb)
     totalMb = try? c.decodeIfPresent(Int.self, forKey: .totalMb)
     systemAvailableMb = try? c.decodeIfPresent(Int.self, forKey: .systemAvailableMb)
+    systemTotalMb = try? c.decodeIfPresent(Int.self, forKey: .systemTotalMb)
+    gatewayRssMb = try? c.decodeIfPresent(Int.self, forKey: .gatewayRssMb)
+    swapUsedMb = try? c.decodeIfPresent(Int.self, forKey: .swapUsedMb)
+    usedPercent = try? c.decodeIfPresent(Double.self, forKey: .usedPercent)
+    sampledAt = try? c.decodeIfPresent(String.self, forKey: .sampledAt)
+    bootId = try? c.decodeIfPresent(String.self, forKey: .bootId)
+    lastBootUnclean = try? c.decodeIfPresent(Bool.self, forKey: .lastBootUnclean)
+    lastBootSuspectedOom = try? c.decodeIfPresent(Bool.self, forKey: .lastBootSuspectedOom)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -117,6 +149,14 @@ public struct ResourcePressure: Equatable, Sendable, Decodable {
     case freeMb = "free_mb"
     case totalMb = "total_mb"
     case systemAvailableMb = "system_available_mb"
+    case systemTotalMb = "system_total_mb"
+    case gatewayRssMb = "gateway_rss_mb"
+    case swapUsedMb = "swap_used_mb"
+    case usedPercent = "used_percent"
+    case sampledAt = "sampled_at"
+    case bootId = "boot_id"
+    case lastBootUnclean = "last_boot_unclean"
+    case lastBootSuspectedOom = "last_boot_suspected_oom"
   }
 
   public var isElevatedOrWorse: Bool {

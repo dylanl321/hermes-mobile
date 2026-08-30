@@ -1,10 +1,10 @@
-# System / Host / Update (# management track)
+# System / Host / Update
 
-Normative invariants for the System management surface. Full phase map:
-[`docs/plans/2026-08-30-system-management-surface.md`](../plans/2026-08-30-system-management-surface.md).
+Normative invariants for the System management surface. Plan history:
+[`docs/plans/completed/2026-08-30-system-management-surface.md`](../plans/completed/2026-08-30-system-management-surface.md).
 Architecture: authenticated dashboard REST only — **not** the push plugin/gateway.
 
-## Scope (shipped incrementally)
+## Scope
 
 - **Host** — `GET /api/system/stats` (OS, versions, CPU/memory/disk, uptime)
 - **Hermes update** — check / apply / receipt (`/api/hermes/update/*`); git Apply only
@@ -15,6 +15,11 @@ Architecture: authenticated dashboard REST only — **not** the push plugin/gate
 - **Operations** — doctor, security-audit, backup, prompt-size, dump, config-migrate
   via `POST /api/ops/*` + `actionStatus` poll
 - **Banners** — unclean boot / suspected OOM from enriched `/api/status` when present
+
+## Entry
+
+Settings → **System** and More → **System** (list-hosted sheet, same pattern as Skills).
+Optimistic `systemSupported`; first `/api/system/stats` 404/405 hides the entry.
 
 ## Invariants
 

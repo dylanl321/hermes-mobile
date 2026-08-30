@@ -206,6 +206,12 @@ public struct SessionListFeature {
     @Presents public var skills: SkillsFeature.State?
     /// Whether the agent exposes `/api/skills` (optimistic true; flipped off on 404).
     public var skillsSupported: Bool
+    /// System / Host / Update sheet (`/api/system/stats`). Hosted like Skills.
+    @Presents public var system: SystemFeature.State?
+    /// Whether the agent exposes System stats (optimistic true; flipped off on 404).
+    public var systemSupported: Bool
+    /// Whether gateway lifecycle routes work (seeded into Settings for post-edit restart).
+    public var gatewaySupported: Bool
     @Presents public var addProfile: AddProfileFeature.State?
     @Presents public var confirmationDialog: ConfirmationDialogState<Action.Dialog>?
 
@@ -260,7 +266,9 @@ public struct SessionListFeature {
       settings: SettingsFeature.State? = nil,
       addProfile: AddProfileFeature.State? = nil,
       fsSupported: Bool = true,
-      skillsSupported: Bool = true
+      skillsSupported: Bool = true,
+      systemSupported: Bool = true,
+      gatewaySupported: Bool = true
     ) {
       self.connection = connection
       self.sessions = sessions
@@ -299,6 +307,8 @@ public struct SessionListFeature {
       self.addProfile = addProfile
       self.fsSupported = fsSupported
       self.skillsSupported = skillsSupported
+      self.systemSupported = systemSupported
+      self.gatewaySupported = gatewaySupported
     }
 
     /// Whether the currently-selected profile is the default (no `?profile=` scoping for
@@ -555,6 +565,9 @@ public struct SessionListFeature {
     /// Open the Skills sheet (More menu / Settings → Skills).
     case skillsButtonTapped
     case skills(PresentationAction<SkillsFeature.Action>)
+    /// Open the System sheet (More menu / Settings → System).
+    case systemButtonTapped
+    case system(PresentationAction<SystemFeature.Action>)
     /// Open the Workspaces browser sheet (More menu / Settings → Workspaces).
     case workspacesButtonTapped
     /// Jump straight into a session’s `cwd` in the Workspaces browser.
@@ -1414,7 +1427,9 @@ public struct SessionListFeature {
           deleteSupported: state.deleteSupported,
           profile: state.scopedProfileName,
           skillsSupported: state.skillsSupported,
-          fsSupported: state.fsSupported
+          fsSupported: state.fsSupported,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
         )
         return .none
 
@@ -1457,6 +1472,49 @@ public struct SessionListFeature {
         return .none
 
       case .skills:
+        return .none
+
+      case .systemButtonTapped:
+        guard state.systemSupported else { return .none }
+        state.settings = nil
+        state.system = SystemFeature.State(
+          connection: state.connection,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
+        )
+        return .none
+
+      case .system(.presented(.delegate(.dismiss))):
+        state.system = nil
+        return .none
+
+      case .system(.presented(.delegate(.systemUnsupported))):
+        state.systemSupported = false
+        state.system = nil
+        if var settings = state.settings {
+          settings.systemSupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .system(.presented(.delegate(.gatewayUnsupported))):
+        state.gatewaySupported = false
+        if var system = state.system {
+          system.gatewaySupported = false
+          state.system = system
+        }
+        if var settings = state.settings {
+          settings.gatewaySupported = false
+          state.settings = settings
+        }
+        return .none
+
+      case .system(.presented(.delegate(.gatewayLifecycleCompleted))):
+        return .run { [rest, baseURL = state.connection.baseURL] send in
+          await send(fetchServerStatus(rest: rest, baseURL: baseURL))
+        }
+
+      case .system:
         return .none
 
       case .workspacesButtonTapped:
@@ -1507,6 +1565,16 @@ public struct SessionListFeature {
           connection: state.connection,
           profile: state.scopedProfileName,
           skillsSupported: state.skillsSupported
+        )
+        return .none
+
+      case .settings(.presented(.delegate(.openSystem))):
+        guard state.systemSupported else { return .none }
+        state.settings = nil
+        state.system = SystemFeature.State(
+          connection: state.connection,
+          systemSupported: state.systemSupported,
+          gatewaySupported: state.gatewaySupported
         )
         return .none
 
@@ -1790,6 +1858,9 @@ public struct SessionListFeature {
     }
     .ifLet(\.$skills, action: \.skills) {
       SkillsFeature()
+    }
+    .ifLet(\.$system, action: \.system) {
+      SystemFeature()
     }
     .ifLet(\.$addProfile, action: \.addProfile) {
       AddProfileFeature()
